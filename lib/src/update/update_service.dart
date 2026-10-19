@@ -31,19 +31,37 @@ class AppRelease {
 ///
 /// 서버가 필요 없고, 광고/추적도 없다. 릴리스 태그가 곧 버전이 된다.
 class UpdateService {
-  UpdateService({http.Client? client}) : _client = client ?? http.Client();
+  UpdateService({
+    http.Client? client,
+    Future<String> Function()? currentVersionProvider,
+    String? apiUrl,
+  }) : _client = client ?? http.Client(),
+       _currentVersionProvider = currentVersionProvider ?? _platformVersion,
+       _apiUrl =
+           apiUrl ??
+           (AppConfig.hasReleaseChannel ? AppConfig.latestReleaseApi : null);
 
   final http.Client _client;
+  final Future<String> Function() _currentVersionProvider;
+
+  /// null이면 업데이트 채널이 설정되지 않은 빌드다(개발 빌드).
+  final String? _apiUrl;
+
+  static Future<String> _platformVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    return info.version;
+  }
 
   /// 최신 릴리스가 현재 버전보다 새로울 때만 [AppRelease]를 돌려준다.
   ///
   /// 네트워크 오류는 호출자에게 던진다. 업데이트는 부가 기능이므로
   /// 호출부에서 조용히 무시할 수 있게 하기 위함이다.
   Future<AppRelease?> checkForUpdate() async {
-    if (!AppConfig.hasReleaseChannel) return null;
+    final apiUrl = _apiUrl;
+    if (apiUrl == null) return null;
 
     final response = await _client.get(
-      Uri.parse(AppConfig.latestReleaseApi),
+      Uri.parse(apiUrl),
       headers: const {
         'Accept': 'application/vnd.github+json',
         'X-GitHub-Api-Version': '2022-11-28',
@@ -62,8 +80,8 @@ class UpdateService {
     if (tag.isEmpty) return null;
     final version = tag.replaceFirst(RegExp(r'^[vV]'), '');
 
-    final info = await PackageInfo.fromPlatform();
-    if (!isNewerVersion(version, info.version)) return null;
+    final currentVersion = await _currentVersionProvider();
+    if (!isNewerVersion(version, currentVersion)) return null;
 
     String? apkUrl;
     final assets = json['assets'];

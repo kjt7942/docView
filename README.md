@@ -70,6 +70,10 @@ flutter build apk --release \
 ```bash
 flutter analyze
 flutter test
+
+# 실제 릴리스를 대상으로 업데이트 경로 확인(네트워크 필요)
+flutter test --dart-define=LIVE_RELEASE_TEST=true \
+  --dart-define=GITHUB_REPO=kjt7942/docView test/live_release_test.dart
 ```
 
 ### 웹 렌더러 번들 재생성
@@ -87,8 +91,13 @@ node tool/build_web_assets.mjs
 
 1. `pubspec.yaml`의 `version`을 올립니다. (예: `1.1.0+2`)
 2. `flutter build apk --release --dart-define=GITHUB_REPO=kjt7942/docView`
-3. `gh release create v1.1.0 build/app/outputs/flutter-apk/app-release.apk#docviewer-1.1.0.apk`
-4. 앱은 태그(`v1.1.0`)를 버전으로 읽어 자동 업데이트를 안내합니다.
+3. 에셋 이름을 버전에 맞춰 바꿉니다.
+   ```bash
+   cp build/app/outputs/flutter-apk/app-release.apk \
+      build/app/outputs/flutter-apk/docviewer-1.1.0.apk
+   ```
+4. `gh release create v1.1.0 build/app/outputs/flutter-apk/docviewer-1.1.0.apk`
+5. 앱은 태그(`v1.1.0`)를 버전으로 읽고, `.apk` 자산을 설치 파일로 사용합니다.
 
 ## 서명 키
 
