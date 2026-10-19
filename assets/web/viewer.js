@@ -4,7 +4,6 @@
 
   var params = new URLSearchParams(location.search);
   var kind = params.get('kind') || '';
-  var token = params.get('token') || '';
 
   var statusEl = document.getElementById('status');
   var statusText = document.getElementById('status-text');
@@ -45,9 +44,8 @@
   }
 
   async function loadBytes() {
-    var res = await fetch('/file?token=' + encodeURIComponent(token), {
-      cache: 'no-store',
-    });
+    // 토큰은 현재 페이지 경로(/<token>/viewer.html)에 있으므로 상대 경로로 요청한다.
+    var res = await fetch('file', { cache: 'no-store' });
     if (!res.ok) {
       throw new Error('파일을 불러오지 못했습니다. (' + res.status + ')');
     }

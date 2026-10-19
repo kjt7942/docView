@@ -42,12 +42,17 @@ class DocumentWebServer {
     return instance;
   }
 
+  /// 토큰은 쿼리가 아니라 경로 첫 세그먼트에 둔다.
+  ///
+  /// viewer.html이 불러오는 CSS/JS/문서 요청은 상대 경로이므로, 토큰이 경로에
+  /// 있어야 모든 하위 요청이 같은 토큰을 자동으로 달고 나간다. (쿼리에 두면
+  /// 하위 요청에서 토큰이 빠져 전부 403이 된다.)
   Uri get uri => Uri(
     scheme: 'http',
     host: '127.0.0.1',
     port: _server.port,
-    path: '/viewer.html',
-    queryParameters: {'kind': kind, 'token': _token},
+    path: '/$_token/viewer.html',
+    queryParameters: {'kind': kind},
   );
 
   static String _randomToken() {
@@ -60,13 +65,16 @@ class DocumentWebServer {
 
   Future<void> _handle(HttpRequest request) async {
     try {
-      if (request.uri.queryParameters['token'] != _token) {
+      final segments = request.uri.pathSegments;
+      if (segments.isEmpty || segments.first != _token) {
         request.response.statusCode = HttpStatus.forbidden;
         await request.response.close();
         return;
       }
 
-      final path = request.uri.path == '/' ? '/viewer.html' : request.uri.path;
+      // 토큰 세그먼트를 떼어낸 나머지가 실제 자원 경로다.
+      final rest = segments.skip(1).join('/');
+      final path = rest.isEmpty ? '/viewer.html' : '/$rest';
 
       if (path == '/file') {
         await _serveDocument(request.response);

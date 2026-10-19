@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  문서 렌더링용 로컬 서버(127.0.0.1)로만 평문 HTTP를 허용한다.
+  Android 9+는 기본적으로 cleartext를 막기 때문에, 이 설정이 없으면 WebView가
+  ERR_CLEARTEXT_NOT_PERMITTED로 viewer.html을 열지 못한다.
+  그 외 모든 도메인(GitHub 업데이트 확인 등)은 기본대로 HTTPS만 허용된다.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">localhost</domain>
+    </domain-config>
+</network-security-config>
