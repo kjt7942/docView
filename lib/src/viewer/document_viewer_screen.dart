@@ -1,0 +1,24 @@
+import 'package:flutter/material.dart';
+
+import '../document.dart';
+import 'pdf_viewer_screen.dart';
+import 'unsupported_format_screen.dart';
+import 'web_document_screen.dart';
+
+/// 확장자를 보고 알맞은 렌더러로 보낸다.
+///
+/// 새 포맷을 지원할 때는 렌더러 위젯을 만들고 이 switch에만 추가하면 된다.
+class DocumentViewerScreen extends StatelessWidget {
+  const DocumentViewerScreen({super.key, required this.document});
+
+  final DocumentFile document;
+
+  @override
+  Widget build(BuildContext context) {
+    return switch (document.format) {
+      DocumentFormat.pdf => PdfViewerScreen(document: document),
+      _ when document.webKind != null => WebDocumentScreen(document: document),
+      _ => UnsupportedFormatScreen(document: document),
+    };
+  }
+}

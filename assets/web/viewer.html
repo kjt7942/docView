@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>문서 보기</title>
+  <link rel="stylesheet" href="/viewer.css" />
+</head>
+<body>
+  <div id="status" class="status">
+    <div class="spinner"></div>
+    <p id="status-text">문서를 여는 중…</p>
+  </div>
+  <main id="root" class="root" hidden></main>
+
+  <script src="/vendor/jszip.min.js"></script>
+  <script src="/vendor/docx-preview.min.js"></script>
+  <script src="/vendor/xlsx.full.min.js"></script>
+  <script src="/vendor/pptx-browser.js"></script>
+  <script src="/vendor/hwp.min.js"></script>
+  <script src="/viewer.js"></script>
+</body>
+</html>

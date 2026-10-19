@@ -1,0 +1,99 @@
+// assets/web/vendor 의 JS 번들을 재생성한다.
+//
+//   node tool/build_web_assets.mjs
+//
+// 네트워크가 필요하며, 결과물은 저장소에 커밋한다(앱은 완전 오프라인으로 동작).
+import { execFileSync } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+const ROOT = path.resolve(import.meta.dirname, '..');
+const VENDOR = path.join(ROOT, 'assets', 'web', 'vendor');
+const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'docviewer-web-'));
+
+const PACKAGES = [
+  'pptx-browser@4.1.5',
+  'hwp.js@0.0.3',
+  'docx-preview@0.4.1',
+  'jszip@3.10.1',
+  'xlsx@0.18.5',
+  'esbuild@0.25.0',
+];
+
+function run(command, args, cwd = WORK) {
+  execFileSync(command, args, { cwd, stdio: 'inherit', shell: process.platform === 'win32' });
+}
+
+console.log(`[1/4] 작업 디렉터리: ${WORK}`);
+fs.writeFileSync(
+  path.join(WORK, 'package.json'),
+  JSON.stringify({ name: 'docviewer-web-assets', private: true }, null, 2),
+);
+run('npm', ['install', '--no-audit', '--no-fund', ...PACKAGES]);
+
+// pptx-browser 4.1.5는 renderTextBody에서 defRPr를 선언 전에 참조한다(TDZ).
+// 번들 후 ReferenceError가 나므로 소스를 패치한 뒤 번들링한다.
+console.log('[2/4] pptx-browser TDZ 패치');
+const renderPath = path.join(WORK, 'node_modules', 'pptx-browser', 'src', 'render.js');
+let render = fs.readFileSync(renderPath, 'utf8');
+const bulletLine = [
+  '    // ── Bullet / list marker ─────────────────────────────────────────────────',
+  "    const bullet = pPr ? parseBullet(pPr, defRPr, themeColors, themeData) : null;",
+].join('\n');
+if (!render.includes(bulletLine)) {
+  throw new Error('pptx-browser render.js 패치 지점을 찾지 못했습니다(버전 변경 확인).');
+}
+render = render.replace(
+  bulletLine,
+  `    const defRPr = g1(pPr, 'defRPr');\n\n${bulletLine}`,
+);
+render = render.replace(
+  "    const lnSpc = g1(pPr, 'lnSpc');\n    const defRPr = g1(pPr, 'defRPr');",
+  "    const lnSpc = g1(pPr, 'lnSpc');",
+);
+fs.writeFileSync(renderPath, render);
+
+// hwp.js의 ESM 빌드는 Node의 fs를 import한다. 브라우저 번들에서는 빈 shim으로 대체한다.
+fs.writeFileSync(
+  path.join(WORK, 'fs-shim.js'),
+  "module.exports = { createReadStream() { throw new Error('fs is not available in the browser'); } };\n",
+);
+
+console.log('[3/4] esbuild 번들링');
+const esbuild = path.join(WORK, 'node_modules', '.bin', 'esbuild');
+run(esbuild, [
+  'node_modules/pptx-browser/src/index.js',
+  '--bundle',
+  '--format=iife',
+  '--global-name=PptxBrowser',
+  '--outfile=out/pptx-browser.js',
+]);
+run(esbuild, [
+  'node_modules/hwp.js/build/esm.js',
+  '--bundle',
+  '--format=iife',
+  '--global-name=HwpJs',
+  '--alias:fs=./fs-shim.js',
+  '--minify',
+  '--outfile=out/hwp.min.js',
+]);
+
+console.log('[4/4] vendor 복사');
+fs.mkdirSync(VENDOR, { recursive: true });
+fs.copyFileSync(path.join(WORK, 'out', 'pptx-browser.js'), path.join(VENDOR, 'pptx-browser.js'));
+fs.copyFileSync(path.join(WORK, 'out', 'hwp.min.js'), path.join(VENDOR, 'hwp.min.js'));
+fs.copyFileSync(
+  path.join(WORK, 'node_modules', 'docx-preview', 'dist', 'docx-preview.min.js'),
+  path.join(VENDOR, 'docx-preview.min.js'),
+);
+fs.copyFileSync(
+  path.join(WORK, 'node_modules', 'jszip', 'dist', 'jszip.min.js'),
+  path.join(VENDOR, 'jszip.min.js'),
+);
+fs.copyFileSync(
+  path.join(WORK, 'node_modules', 'xlsx', 'dist', 'xlsx.full.min.js'),
+  path.join(VENDOR, 'xlsx.full.min.js'),
+);
+
+console.log('완료:', fs.readdirSync(VENDOR).join(', '));
