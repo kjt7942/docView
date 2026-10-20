@@ -2,6 +2,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import 'document.dart';
+import 'incoming_file.dart';
 import 'update/update_ui.dart';
 import 'viewer/document_viewer_screen.dart';
 
@@ -24,6 +25,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkForUpdates(context);
     });
+
+    // 다른 앱에서 "연결 프로그램"으로 문서를 열어 온 경우.
+    IncomingFileService.listen(_openIncoming);
+    IncomingFileService.initialFile().then((file) {
+      if (file != null) _openIncoming(file);
+    });
+  }
+
+  @override
+  void dispose() {
+    IncomingFileService.stopListening();
+    super.dispose();
+  }
+
+  void _openIncoming(DocumentFile file) {
+    if (!mounted) return;
+    _remember(file);
+    _openDocument(file);
   }
 
   Future<void> _pickDocument() async {
