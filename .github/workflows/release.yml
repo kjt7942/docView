@@ -51,7 +51,8 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
         run: |
           if [ -n "$KEYSTORE_BASE64" ]; then
-            echo "$KEYSTORE_BASE64" | base64 -d > android/release.jks
+            # app/build.gradle.kts의 storeFile은 android/app 기준 상대 경로다.
+            echo "$KEYSTORE_BASE64" | base64 -d > android/app/release.jks
             cat > android/key.properties <<PROPS
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}
