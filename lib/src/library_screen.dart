@@ -1,5 +1,6 @@
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'document.dart';
 import 'incoming_file.dart';
@@ -27,16 +28,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
     });
 
     // 다른 앱에서 "연결 프로그램"으로 문서를 열어 온 경우.
-    IncomingFileService.listen(_openIncoming);
+    IncomingFileService.listen(_openIncoming, onError: _showError);
     IncomingFileService.initialFile().then((file) {
       if (file != null) _openIncoming(file);
-    });
+    }, onError: (Object e) => _showError(e is PlatformException ? e.message : null));
   }
 
   @override
   void dispose() {
     IncomingFileService.stopListening();
     super.dispose();
+  }
+
+  void _showError(String? message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message ?? '문서를 가져오지 못했습니다.')),
+    );
   }
 
   void _openIncoming(DocumentFile file) {
@@ -216,6 +224,8 @@ class _EmptyState extends StatelessWidget {
                     DocumentFormat.excel,
                     DocumentFormat.powerpoint,
                     DocumentFormat.hwp,
+                    DocumentFormat.text,
+                    DocumentFormat.image,
                   ])
                     _FormatChip(format: format),
                 ],

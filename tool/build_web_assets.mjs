@@ -54,6 +54,42 @@ render = render.replace(
 );
 fs.writeFileSync(renderPath, render);
 
+// hwp.js 0.0.3 splitTable은 첫 행이 한 페이지보다 높으면 같은 표로 무한 재귀한다
+// ("Maximum call stack size exceeded"). 새 페이지에서도 안 들어가는 첫 행은 강제로
+// 넣어 진행시키고, 이때는 셀 분할(overflow)을 건너뛴다.
+console.log('[2/4] hwp.js splitTable 무한 재귀 패치');
+const hwpPath = path.join(WORK, 'node_modules', 'hwp.js', 'build', 'esm.js');
+let hwp = fs.readFileSync(hwpPath, 'utf8');
+const splitElse = [
+  '    } else {',
+  '      splitRowIndex = i;',
+  '      break;',
+  '    }',
+].join('\n');
+const splitOverflow = '      if (column.attribute.height > targetHeight) {';
+if (!hwp.includes(splitElse) || !hwp.includes(splitOverflow)) {
+  throw new Error('hwp.js splitTable 패치 지점을 찾지 못했습니다(버전 변경 확인).');
+}
+hwp = hwp
+  .replace(
+    splitElse,
+    [
+      '    } else {',
+      '      if (i === 0 && targetHeight >= contentHeight) {',
+      '        forced = true;',
+      '        columns.push(row);',
+      '        if (table.length > 1) splitRowIndex = 1;',
+      '      } else {',
+      '        splitRowIndex = i;',
+      '      }',
+      '      break;',
+      '    }',
+    ].join('\n'),
+  )
+  .replace('  var columns = [];\n  var rowHeights = [];', '  var columns = [];\n  var rowHeights = [];\n  var forced = false;')
+  .replace(splitOverflow, '      if (!forced && column.attribute.height > targetHeight) {');
+fs.writeFileSync(hwpPath, hwp);
+
 // hwp.js의 ESM 빌드는 Node의 fs를 import한다. 브라우저 번들에서는 빈 shim으로 대체한다.
 fs.writeFileSync(
   path.join(WORK, 'fs-shim.js'),

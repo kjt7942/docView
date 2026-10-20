@@ -52,6 +52,22 @@
     return await res.arrayBuffer();
   }
 
+  /* 문서 페이지가 화면보다 넓으면 폭에 맞춰 줄인다. 이후 확대는 핀치 줌으로 한다.
+   * target: 줄일 요소를 돌려주는 함수(기본은 선택자에 걸린 페이지 자신), measure: 폭을 재는 요소. */
+  function fitToWidth(selector, target) {
+    function apply() {
+      var avail = root.clientWidth - 24; // .root 좌우 패딩
+      document.querySelectorAll(selector).forEach(function (el) {
+        var t = target ? target(el) : el;
+        t.style.zoom = '';
+        var w = el.offsetWidth;
+        if (w > avail) t.style.zoom = String(avail / w);
+      });
+    }
+    apply();
+    window.addEventListener('resize', apply);
+  }
+
   /* ---------------- DOCX ---------------- */
 
   async function renderDocx(buffer) {
@@ -64,6 +80,7 @@
       experimental: true,
       useBase64URL: true,
     });
+    fitToWidth('.docx-wrapper > section.docx');
     post({ type: 'ready' });
   }
 
@@ -189,6 +206,10 @@
     new HwpJs.Viewer(host, Array.from(new Uint8Array(buffer)), {
       type: 'array',
     });
+    // 페이지는 margin:auto로 가운데 정렬되므로 페이지 각각이 아니라 컨테이너 전체를 줄인다.
+    fitToWidth('.hwp-host div[data-page-number]:not(.hwpjs-observer):first-of-type', function (page) {
+      return page.parentElement;
+    });
     post({ type: 'ready', pages: host.querySelectorAll('[data-page-number]').length });
   }
 
@@ -199,6 +220,108 @@
     pre.className = 'text-doc';
     pre.textContent = new TextDecoder('utf-8').decode(buffer);
     root.appendChild(pre);
+    post({ type: 'ready' });
+  }
+
+  function escapeHtml(s) {
+    return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  function inlineMd(s) {
+    s = escapeHtml(s);
+    return s
+      .replace(/`([^`]+)`/g, '<code>$1</code>')
+      .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+      .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')
+      .replace(/~~([^~]+)~~/g, '<del>$1</del>')
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1');
+  }
+
+  // ponytail: 제목/목록(중첩)/인용/코드블록/표/수평선/굵게/기울임만 지원. 그 외 문법은 문단으로 보인다.
+  function mdToHtml(src) {
+    var out = [];
+    var lists = []; // 열린 목록 스택: { tag, indent }
+    var code = null;
+    var lines = src.replace(/\r\n?/g, '\n').split('\n');
+
+    function closeLists(toIndent) {
+      while (lists.length && lists[lists.length - 1].indent >= toIndent) {
+        out.push('</' + lists.pop().tag + '>');
+      }
+    }
+    function cells(line) {
+      return line.trim().replace(/^\|/, '').replace(/\|$/, '').split('|');
+    }
+    function isTableSep(line) {
+      return /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/.test(line) && line.indexOf('|') >= 0;
+    }
+
+    for (var i = 0; i < lines.length; i++) {
+      var line = lines[i];
+      var m;
+
+      if (/^```/.test(line)) {
+        if (code === null) { closeLists(0); code = []; }
+        else { out.push('<pre><code>' + escapeHtml(code.join('\n')) + '</code></pre>'); code = null; }
+        continue;
+      }
+      if (code !== null) { code.push(line); continue; }
+
+      if (line.indexOf('|') >= 0 && i + 1 < lines.length && isTableSep(lines[i + 1])) {
+        closeLists(0);
+        out.push('<table><thead><tr>' + cells(line).map(function (c) {
+          return '<th>' + inlineMd(c.trim()) + '</th>';
+        }).join('') + '</tr></thead><tbody>');
+        i += 2;
+        while (i < lines.length && lines[i].indexOf('|') >= 0 && lines[i].trim() !== '') {
+          out.push('<tr>' + cells(lines[i]).map(function (c) {
+            return '<td>' + inlineMd(c.trim()) + '</td>';
+          }).join('') + '</tr>');
+          i++;
+        }
+        i--;
+        out.push('</tbody></table>');
+        continue;
+      }
+
+      var item = /^(\s*)([-*+]|\d+[.)])\s+(.*)$/.exec(line);
+      if (item) {
+        var indent = item[1].replace(/\t/g, '    ').length;
+        var tag = /\d/.test(item[2].charAt(0)) ? 'ol' : 'ul';
+        var top = lists[lists.length - 1];
+        if (top && indent < top.indent) closeLists(indent + 1);
+        top = lists[lists.length - 1];
+        if (top && indent === top.indent && top.tag !== tag) { closeLists(indent); top = null; }
+        if (!top || indent > top.indent) {
+          lists.push({ tag: tag, indent: indent });
+          out.push('<' + tag + '>');
+        }
+        out.push('<li>' + inlineMd(item[3]) + '</li>');
+        continue;
+      }
+
+      closeLists(0);
+      if ((m = /^(#{1,6})\s+(.*)$/.exec(line))) {
+        out.push('<h' + m[1].length + '>' + inlineMd(m[2]) + '</h' + m[1].length + '>');
+      } else if ((m = /^>\s?(.*)$/.exec(line))) {
+        out.push('<blockquote>' + inlineMd(m[1]) + '</blockquote>');
+      } else if (/^\s*(-{3,}|\*{3,}|_{3,})\s*$/.test(line)) {
+        out.push('<hr>');
+      } else if (line.trim() !== '') {
+        out.push('<p>' + inlineMd(line) + '</p>');
+      }
+    }
+    closeLists(0);
+    if (code !== null) out.push('<pre><code>' + escapeHtml(code.join('\n')) + '</code></pre>');
+    return out.join('\n');
+  }
+
+  function renderMarkdown(buffer) {
+    var article = document.createElement('article');
+    article.className = 'md-doc';
+    article.innerHTML = mdToHtml(new TextDecoder('utf-8').decode(buffer));
+    root.appendChild(article);
     post({ type: 'ready' });
   }
 
@@ -217,6 +340,36 @@
     };
     host.appendChild(img);
     root.appendChild(host);
+
+    // 회전하면 레이아웃 크기가 바뀌지 않으므로, 90도 단위일 때 상자 크기를 맞바꾼다.
+    var turns = 0;
+    function applyRotation() {
+      var w = img.naturalWidth, h = img.naturalHeight;
+      var sideways = turns % 2 === 1;
+      var availW = root.clientWidth - 24; // .root 좌우 패딩
+      var boxW = sideways ? h : w, boxH = sideways ? w : h;
+      var scale = Math.min(1, availW / boxW);
+      host.style.width = boxW * scale + 'px';
+      host.style.height = boxH * scale + 'px';
+      host.style.position = 'relative';
+      host.style.margin = '0 auto';
+      img.style.cssText =
+        'position:absolute;left:50%;top:50%;max-width:none;width:' + w * scale + 'px;height:' + h * scale + 'px;' +
+        'transform:translate(-50%,-50%) rotate(' + turns * 90 + 'deg);';
+    }
+    var rotate = document.createElement('button');
+    rotate.className = 'rotate-btn';
+    rotate.type = 'button';
+    rotate.setAttribute('aria-label', '회전');
+    rotate.textContent = '⟳';
+    rotate.addEventListener('click', function () {
+      turns = (turns + 1) % 4;
+      applyRotation();
+    });
+    document.body.appendChild(rotate);
+    img.addEventListener('load', applyRotation);
+    window.addEventListener('resize', applyRotation);
+
     window.addEventListener('pagehide', function () {
       URL.revokeObjectURL(url);
     });
@@ -239,6 +392,8 @@
         renderHwp(buffer);
       } else if (kind === 'text') {
         renderText(buffer);
+      } else if (kind === 'markdown') {
+        renderMarkdown(buffer);
       } else if (kind === 'image') {
         renderImage(buffer);
       } else {

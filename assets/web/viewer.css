@@ -181,7 +181,40 @@ html, body {
 .hwp-host { display: flex; justify-content: center; }
 .hwp-host .viewer { background: var(--paper) !important; }
 
+/* ---------- MARKDOWN ---------- */
+
+.md-doc {
+  padding: 8px 18px 18px;
+  background: var(--paper);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  line-height: 1.7;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.md-doc h1, .md-doc h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.md-doc code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
+.md-doc pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
+.md-doc pre code { background: none; padding: 0; }
+.md-doc blockquote { margin: 8px 0; padding: 2px 12px; border-left: 3px solid var(--accent); color: var(--muted); }
+.md-doc hr { border: 0; border-top: 1px solid var(--border); }
+
 /* ---------- TEXT / IMAGE ---------- */
+
+.rotate-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 24px;
+  width: 48px;
+  height: 48px;
+  border-radius: 24px;
+  border: 0;
+  background: var(--accent);
+  color: #fff;
+  font-size: 24px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 20;
+}
 
 pre.text-doc {
   margin: 0;
@@ -198,3 +231,17 @@ pre.text-doc {
 
 .image-host { display: flex; justify-content: center; }
 .image-host img { max-width: 100%; height: auto; border-radius: 8px; }
+
+/* hwp.js는 페이지 너비를 content-box 기준으로 계산한다(여백은 폭 바깥). */
+.hwp-host div[data-page-number], .hwp-host div[data-page-number] * { box-sizing: content-box; }
+
+/* 화면 밖 페이지는 레이아웃/페인트를 건너뛰어 수백 쪽 문서의 메모리를 줄인다. */
+.hwp-host div[data-page-number]:not(.hwpjs-observer) {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 1123px;
+}
+
+.md-doc table { border-collapse: collapse; margin: 8px 0; display: block; overflow-x: auto; }
+.md-doc th, .md-doc td { border: 1px solid var(--border); padding: 4px 10px; }
+.md-doc th { background: var(--bg); }
+.md-doc ul, .md-doc ol { margin: 4px 0; }

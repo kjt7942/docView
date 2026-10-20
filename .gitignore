@@ -51,3 +51,6 @@ app.*.map.json
 android/key.properties
 *.jks
 *.keystore
+
+# 개발 중 점검용 샘플 문서(저작권/용량 문제로 저장소에 올리지 않는다)
+sample/

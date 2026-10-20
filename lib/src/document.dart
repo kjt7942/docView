@@ -124,7 +124,8 @@ class DocumentFile {
     'xlsx' || 'xls' || 'csv' => 'xlsx',
     'pptx' => 'pptx',
     'hwp' => 'hwp',
-    'txt' || 'md' || 'log' => 'text',
+    'md' => 'markdown',
+    'txt' || 'log' => 'text',
     'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'bmp' => 'image',
     _ => null,
   };

@@ -68,10 +68,8 @@ jobs:
         if: steps.check.outputs.build == 'true'
       - run: flutter analyze
         if: steps.check.outputs.build == 'true'
-        continue-on-error: true
       - run: flutter test
         if: steps.check.outputs.build == 'true'
-        continue-on-error: true
 
       - name: APK 빌드
         if: steps.check.outputs.build == 'true'
@@ -92,6 +90,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           TAG="v${{ steps.asset.outputs.version }}"
+          # 앱의 업데이트 안내 창에 릴리스 노트가 그대로 보이므로 커밋 메시지(트레일러 제외)를 쓴다.
+          NOTES=$(git log -1 --format=%B | grep -vE '^(Co-Authored-By|Claude-Session):')
           # 릴리스 키로 서명하지 못했다면 prerelease로 올려 앱의 자동 업데이트(latest)에 잡히지 않게 한다.
           FLAGS=""
           if [ "${{ steps.signing.outputs.signed }}" != "true" ]; then FLAGS="--prerelease"; fi
@@ -99,5 +99,5 @@ jobs:
             gh release upload "$TAG" "${{ steps.asset.outputs.name }}" --clobber
           else
             gh release create "$TAG" "${{ steps.asset.outputs.name }}" \
-              --target "${{ github.sha }}" --title "$TAG" --generate-notes $FLAGS
+              --target "${{ github.sha }}" --title "$TAG" --notes "$NOTES" $FLAGS
           fi

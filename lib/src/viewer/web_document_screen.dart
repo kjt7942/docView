@@ -54,6 +54,7 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
       final dark = PlatformDispatcher.instance.platformBrightness == Brightness.dark;
       final controller = WebViewController()
         ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..enableZoom(true)
         ..setBackgroundColor(dark ? const Color(0xFF121518) : const Color(0xFFECEEF2))
         ..addJavaScriptChannel(
           'DocumentBridge',

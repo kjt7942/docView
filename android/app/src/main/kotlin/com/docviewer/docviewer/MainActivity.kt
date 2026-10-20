@@ -37,6 +37,14 @@ class MainActivity : FlutterActivity() {
             "image/webp" to "webp",
             "image/bmp" to "bmp",
             "image/x-ms-bmp" to "bmp",
+            "application/x-msexcel" to "xls",
+            "text/x-csv" to "csv",
+            "application/csv" to "csv",
+            "text/x-markdown" to "md",
+            "application/hwp" to "hwp",
+            "application/x-hwp-v5" to "hwp",
+            "image/jpg" to "jpg",
+            "text/x-log" to "log",
         )
     }
 
@@ -53,7 +61,10 @@ class MainActivity : FlutterActivity() {
                         val launchIntent = intent
                         // 한 번 처리한 인텐트는 다시 처리하지 않도록 비운다.
                         setIntent(Intent(Intent.ACTION_MAIN))
-                        resolveIncoming(launchIntent) { result.success(it) }
+                        resolveIncoming(launchIntent) { file ->
+                            val error = file?.get("error") as? String
+                            if (error != null) result.error("open_failed", error, null) else result.success(file)
+                        }
                     }
                     else -> result.notImplemented()
                 }
@@ -114,7 +125,12 @@ class MainActivity : FlutterActivity() {
         super.onNewIntent(intent)
         // 앱이 이미 떠 있는 상태에서 다른 문서를 "연결 프로그램"으로 열었을 때.
         resolveIncoming(intent) { file ->
-            if (file != null) incomingChannel?.invokeMethod("openFile", file)
+            val error = file?.get("error") as? String
+            if (error != null) {
+                incomingChannel?.invokeMethod("openError", error)
+            } else if (file != null) {
+                incomingChannel?.invokeMethod("openFile", file)
+            }
         }
     }
 
@@ -129,10 +145,17 @@ class MainActivity : FlutterActivity() {
         val mime = source.type
         // 큰 파일 복사가 UI를 막지 않도록 백그라운드에서 처리한다.
         Thread {
-            val file = try {
+            val file: Map<String, Any?> = try {
                 copyToCache(uri, mime)
             } catch (e: Exception) {
-                null
+                val denied = e is SecurityException || e.message?.contains("EACCES") == true
+                mapOf(
+                    "error" to if (denied) {
+                        "이 파일을 읽을 권한이 없습니다. 파일 관리자나 \"문서 열기\"로 다시 열어 주세요."
+                    } else {
+                        "문서를 가져오지 못했습니다."
+                    },
+                )
             }
             runOnUiThread { callback(file) }
         }.start()
