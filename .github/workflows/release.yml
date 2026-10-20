@@ -1,0 +1,79 @@
+name: Release APK
+
+# v* 태그를 푸시하면 APK를 빌드해서 GitHub Release에 올린다.
+#   git tag v1.0.1 && git push origin v1.0.1
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: 릴리스 서명 키 준비
+        id: signing
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+        run: |
+          if [ -n "$KEYSTORE_BASE64" ]; then
+            echo "$KEYSTORE_BASE64" | base64 -d > android/release.jks
+            cat > android/key.properties <<PROPS
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=${KEY_PASSWORD:-$KEYSTORE_PASSWORD}
+          keyAlias=$KEY_ALIAS
+          storeFile=release.jks
+          PROPS
+            echo "signed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::KEYSTORE_BASE64 시크릿이 없어 디버그 키로 서명합니다. 기존 설치본과 서명이 달라 덮어쓰기 업데이트가 안 됩니다."
+            echo "signed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - run: flutter pub get
+      - run: flutter analyze
+      - run: flutter test
+
+      - name: APK 빌드
+        run: flutter build apk --release --dart-define=GITHUB_REPO=${{ github.repository }}
+
+      - name: 에셋 이름 정리
+        id: asset
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//')
+          cp build/app/outputs/flutter-apk/app-release.apk "docviewer-${VERSION}.apk"
+          echo "name=docviewer-${VERSION}.apk" >> "$GITHUB_OUTPUT"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: GitHub Release 생성
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${{ steps.asset.outputs.version }}"
+          # 릴리스 키로 서명하지 못했다면 prerelease로 올려 앱의 자동 업데이트(latest)에 잡히지 않게 한다.
+          FLAGS=""
+          if [ "${{ steps.signing.outputs.signed }}" != "true" ]; then FLAGS="--prerelease"; fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" "${{ steps.asset.outputs.name }}" --clobber
+          else
+            gh release create "$TAG" "${{ steps.asset.outputs.name }}" \
+              --title "$TAG" --generate-notes $FLAGS
+          fi
