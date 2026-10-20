@@ -187,6 +187,12 @@ class _ReaderSettingsSheetState extends State<ReaderSettingsSheet> {
               14,
               (v) => _apply(_s.copyWith(dim: v)),
             ),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('읽는 동안 화면 켜 두기'),
+              value: _s.keepScreenOn,
+              onChanged: (v) => _apply(_s.copyWith(keepScreenOn: v)),
+            ),
             _title('넘김'),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,

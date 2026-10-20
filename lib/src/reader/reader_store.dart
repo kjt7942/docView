@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'reader_settings.dart';
@@ -101,7 +102,26 @@ class ReaderStore {
     return _instance = store;
   }
 
+  @visibleForTesting
+  static void useForTesting(ReaderStore? store) => _instance = store;
+
   static String keyFor(String name, int size) => '$name|$size';
+
+  /// 읽던 위치를 기록한다. 오래된 문서의 기록부터 지워 [maxPositions]개까지만 보관한다.
+  void setPosition(String key, int offset, {int maxPositions = 300}) {
+    positions.remove(key); // 다시 넣어 가장 최근 항목으로 만든다.
+    positions[key] = offset;
+    while (positions.length > maxPositions) {
+      positions.remove(positions.keys.first);
+    }
+    saveSoon();
+  }
+
+  void removeRecent(String name, int size) {
+    final key = keyFor(name, size);
+    recents.removeWhere((r) => keyFor(r.name, r.size) == key);
+    saveSoon();
+  }
 
   Future<void> load() async {
     try {

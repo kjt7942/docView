@@ -139,6 +139,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  /// 목록에서만 지운다(원본 파일은 그대로). 잠시 동안 실행 취소할 수 있다.
+  void _removeRecent(DocumentFile document, int position) {
+    setState(() => _recent.removeAt(position));
+    ReaderStore.open().then(
+      (store) => store.removeRecent(document.name, document.size),
+    );
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('"${document.name}"을(를) 목록에서 지웠습니다.'),
+          action: SnackBarAction(
+            label: '실행 취소',
+            onPressed: () {
+              if (!mounted) return;
+              _remember(document);
+            },
+          ),
+        ),
+      );
+  }
+
   // ───────── 검색 ─────────
 
   void _onSearchChanged(String _) {
@@ -330,9 +352,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   );
                 }
                 final document = _recent[index - 1];
-                return _DocumentTile(
-                  document: document,
-                  onTap: () => _openDocument(document),
+                return Dismissible(
+                  key: ValueKey('${document.name}|${document.size}'),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.errorContainer,
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.delete_outline,
+                      color: theme.colorScheme.onErrorContainer,
+                    ),
+                  ),
+                  onDismissed: (_) => _removeRecent(document, index - 1),
+                  child: _DocumentTile(
+                    document: document,
+                    onTap: () => _openDocument(document),
+                  ),
                 );
               },
             ),

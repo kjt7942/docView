@@ -11,6 +11,7 @@ import 'reader_settings.dart';
 import 'reader_settings_sheet.dart';
 import 'reader_store.dart';
 import 'reader_text.dart';
+import 'screen_awake.dart';
 import 'text_decoder.dart';
 
 /// TXT 전용 리더.
@@ -69,6 +70,9 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
 
   Timer? _holdTimer;
 
+  // 문서를 열면 조작 방법을 보여 주려고 메뉴를 띄우지만, 그대로 두면 하단 바가 아래쪽 넘김 영역을 가린다.
+  Timer? _autoHide;
+
   String get _key =>
       ReaderStore.keyFor(widget.document.name, widget.document.size);
 
@@ -81,23 +85,30 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
 
   Future<void> _init() async {
     try {
-      final store = await ReaderStore.open();
-      store.addRecent(
-        RecentEntry(
-          path: widget.document.path,
-          name: widget.document.name,
-          size: widget.document.size,
-          openedAt: DateTime.now().millisecondsSinceEpoch,
-        ),
-      );
+      // 설정·기록 저장소를 열지 못해도(저장 공간 문제 등) 문서는 읽을 수 있어야 한다.
+      ReaderStore? store;
+      try {
+        store = await ReaderStore.open();
+        store.addRecent(
+          RecentEntry(
+            path: widget.document.path,
+            name: widget.document.name,
+            size: widget.document.size,
+            openedAt: DateTime.now().millisecondsSinceEpoch,
+          ),
+        );
+      } catch (_) {
+        store = null;
+      }
       final raw = await readTextFile(File(widget.document.path));
       if (!mounted) return;
       setState(() {
         _store = store;
-        _s = store.settings;
+        _s = store?.settings ?? _s;
         _raw = raw;
         _text = ReaderText.build(raw, joinLines: _s.joinLines);
       });
+      ScreenAwake.set(_s.keepScreenOn);
     } catch (_) {
       if (!mounted) return;
       setState(() => _error = '파일을 읽을 수 없습니다.');
@@ -107,6 +118,8 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
   @override
   void dispose() {
     _holdTimer?.cancel();
+    _autoHide?.cancel();
+    ScreenAwake.set(false);
     _scroll.removeListener(_onScroll);
     _store?.save();
     _scroll.dispose();
@@ -214,6 +227,9 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
       _jumpToOffset(anchorOffset);
       if (!_firstLayoutDone) {
         _firstLayoutDone = true;
+        _autoHide = Timer(const Duration(milliseconds: 2500), () {
+          if (mounted && !_searching) _hideBars();
+        });
         final query = widget.initialQuery;
         if (query != null && query.isNotEmpty) {
           _searchController.text = query;
@@ -244,8 +260,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
     final text = _text;
     final store = _store;
     if (text != null && store != null && _extents.length == text.length) {
-      store.positions[_key] = text.starts[_topIndex()];
-      store.saveSoon();
+      store.setPosition(_key, text.starts[_topIndex()]);
     }
   }
 
@@ -295,6 +310,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
   }
 
   void _onTap(double dy, double height) {
+    _autoHide?.cancel(); // 사용자가 직접 조작하면 자동 숨김은 그만둔다.
     if (_s.tapPaging && !_searching) {
       if (dy > height * (1 - _tapZone)) {
         _hideBars();
@@ -323,6 +339,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
   void _applySettings(ReaderSettings next, {required bool relayout}) {
     final anchor = _currentOffset(); // 원문 위치는 문단을 다시 나누기 전에 읽어 둔다.
     final rejoin = next.joinLines != _s.joinLines;
+    final keepChanged = next.keepScreenOn != _s.keepScreenOn;
     final raw = _raw;
     setState(() {
       _s = next;
@@ -334,6 +351,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
     _store
       ?..settings = next
       ..saveSoon();
+    if (keepChanged) ScreenAwake.set(next.keepScreenOn);
     if (relayout || rejoin) {
       _layout(_layoutWidth, anchor: anchor);
       if (_query.isNotEmpty) _runSearch(_query, jump: false);
@@ -668,7 +686,14 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
             ? Brightness.dark
             : Brightness.light,
       ),
-      child: Scaffold(backgroundColor: bg, body: body),
+      // 검색 중에 뒤로 가기를 누르면 문서를 닫지 않고 검색부터 닫는다.
+      child: PopScope(
+        canPop: !_searching,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) _closeSearch();
+        },
+        child: Scaffold(backgroundColor: bg, body: body),
+      ),
     );
   }
 
@@ -718,6 +743,19 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
                     _spanFor(index, text.paragraphs[index], style),
                     strutStyle: strut,
                     textScaler: TextScaler.noScaling,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        if (ready && (_raw?.trim().isEmpty ?? false))
+          Positioned.fill(
+            child: IgnorePointer(
+              child: Center(
+                child: Text(
+                  '내용이 없는 파일입니다.',
+                  style: TextStyle(
+                    color: Color(_s.text).withValues(alpha: 0.6),
                   ),
                 ),
               ),

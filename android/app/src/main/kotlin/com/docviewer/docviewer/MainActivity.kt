@@ -5,6 +5,7 @@ import android.net.Uri
 import android.os.Build
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.view.WindowManager
 import androidx.core.content.FileProvider
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -15,6 +16,7 @@ class MainActivity : FlutterActivity() {
     private companion object {
         const val CHANNEL = "app.docviewer/installer"
         const val INCOMING_CHANNEL = "app.docviewer/incoming"
+        const val SCREEN_CHANNEL = "app.docviewer/screen"
         const val MAX_KEPT_INCOMING = 10
 
         // 이름에 확장자가 없을 때 MIME으로 확장자를 복원한다.
@@ -58,6 +60,21 @@ class MainActivity : FlutterActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        // 읽는 동안 화면이 꺼지지 않게 하는 채널.
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, SCREEN_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "keepOn") {
+                    if (call.arguments == true) {
+                        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    } else {
+                        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    result.success(null)
+                } else {
+                    result.notImplemented()
+                }
+            }
 
         // "연결 프로그램"으로 들어온 문서를 Dart에 넘기는 채널.
         incomingChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INCOMING_CHANNEL).also { channel ->

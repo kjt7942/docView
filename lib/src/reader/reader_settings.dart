@@ -64,6 +64,7 @@ class ReaderSettings {
     this.tapPaging = true,
     this.pageRatio = 0.9,
     this.holdSpeed = 1.5,
+    this.keepScreenOn = true,
   });
 
   final double fontSize;
@@ -95,6 +96,9 @@ class ReaderSettings {
   /// 길게 누르고 있을 때 1초에 넘어가는 화면 수.
   final double holdSpeed;
 
+  /// 읽는 동안 화면이 꺼지지 않게 한다.
+  final bool keepScreenOn;
+
   String? get fontFamily => readerFonts[font];
 
   /// 글자 배치(= 문단 높이)에 영향을 주는 값이 같은지. 다르면 높이를 다시 재야 한다.
@@ -122,6 +126,7 @@ class ReaderSettings {
     bool? tapPaging,
     double? pageRatio,
     double? holdSpeed,
+    bool? keepScreenOn,
   }) => ReaderSettings(
     fontSize: fontSize ?? this.fontSize,
     lineHeight: lineHeight ?? this.lineHeight,
@@ -137,6 +142,7 @@ class ReaderSettings {
     tapPaging: tapPaging ?? this.tapPaging,
     pageRatio: pageRatio ?? this.pageRatio,
     holdSpeed: holdSpeed ?? this.holdSpeed,
+    keepScreenOn: keepScreenOn ?? this.keepScreenOn,
   );
 
   Map<String, Object> toJson() => {
@@ -154,6 +160,7 @@ class ReaderSettings {
     'tapPaging': tapPaging,
     'pageRatio': pageRatio,
     'holdSpeed': holdSpeed,
+    'keepScreenOn': keepScreenOn,
   };
 
   /// 저장된 값이 일부 없거나 범위를 벗어나도 안전하게 읽는다.
@@ -189,6 +196,7 @@ class ReaderSettings {
       tapPaging: flag('tapPaging', d.tapPaging),
       pageRatio: number('pageRatio', d.pageRatio, 0.2, 1.0),
       holdSpeed: number('holdSpeed', d.holdSpeed, 0.3, 6),
+      keepScreenOn: flag('keepScreenOn', d.keepScreenOn),
     );
   }
 

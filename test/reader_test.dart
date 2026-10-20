@@ -13,8 +13,17 @@ void main() {
     final table = File('assets/cp949.bin').readAsBytesSync();
 
     test('UTF-8(BOM 유무)을 읽는다', () {
-      expect(decodeText(Uint8List.fromList(utf8.encode('한글 abc')), table), '한글 abc');
-      expect(decodeText(Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode('한글')]), table), '한글');
+      expect(
+        decodeText(Uint8List.fromList(utf8.encode('한글 abc')), table),
+        '한글 abc',
+      );
+      expect(
+        decodeText(
+          Uint8List.fromList([0xEF, 0xBB, 0xBF, ...utf8.encode('한글')]),
+          table,
+        ),
+        '한글',
+      );
     });
 
     test('CP949(EUC-KR 확장)를 읽는다', () {
@@ -34,8 +43,39 @@ void main() {
       expect(text.codeUnitAt(text.length - 1), 0x00B7);
     });
 
+    test('깨진 바이트가 조금 섞인 UTF-8은 UTF-8로 읽는다(CP949로 오판하지 않음)', () {
+      final bytes = Uint8List.fromList([
+        ...utf8.encode('정상 한글 문장입니다. ' * 50),
+        0xFF, 0xFE, 0xFD, // 깨진 바이트
+        ...utf8.encode('끝'),
+      ]);
+      final text = decodeText(bytes, table);
+      expect(text.startsWith('정상 한글 문장입니다.'), isTrue);
+      expect(text.endsWith('끝'), isTrue);
+    });
+
+    test('영문이 대부분인 CP949 문서도 CP949로 읽는다', () {
+      // "Hello " + 한글(C7 D1 B1 DB) + " world"
+      final bytes = Uint8List.fromList([
+        ...ascii.encode('Hello '),
+        0xC7,
+        0xD1,
+        0xB1,
+        0xDB,
+        ...ascii.encode(' world'),
+      ]);
+      expect(decodeText(bytes, table), 'Hello 한글 world');
+    });
+
     test('UTF-16 BOM을 읽는다', () {
-      final le = Uint8List.fromList([0xFF, 0xFE, 0x5C, 0xD5, 0x00, 0xAE]); // 한글(LE)
+      final le = Uint8List.fromList([
+        0xFF,
+        0xFE,
+        0x5C,
+        0xD5,
+        0x00,
+        0xAE,
+      ]); // 한글(LE)
       expect(decodeText(le, table), '한글');
       final be = Uint8List.fromList([0xFE, 0xFF, 0xD5, 0x5C, 0xAE, 0x00]);
       expect(decodeText(be, table), '한글');
@@ -59,13 +99,19 @@ void main() {
     });
 
     test('개행 제거: 문장 부호 없이 꺾인 줄을 이어 붙인다', () {
-      final t = ReaderText.build('오늘은 날씨가\n맑고 화창했다.\n내일은 비가\n온다고 한다.', joinLines: true);
+      final t = ReaderText.build(
+        '오늘은 날씨가\n맑고 화창했다.\n내일은 비가\n온다고 한다.',
+        joinLines: true,
+      );
       expect(t.paragraphs, ['오늘은 날씨가 맑고 화창했다.', '내일은 비가 온다고 한다.']);
       expect(t.starts, [0, 17]); // 첫 문단 두 줄: 8자 + 9자(줄바꿈 포함)
     });
 
     test('개행 제거: 빈 줄과 들여쓰기는 문단 경계', () {
-      final t = ReaderText.build('첫 문단 줄1\n줄2\n\n둘째 문단\n　들여쓴 문단', joinLines: true);
+      final t = ReaderText.build(
+        '첫 문단 줄1\n줄2\n\n둘째 문단\n　들여쓴 문단',
+        joinLines: true,
+      );
       expect(t.paragraphs, ['첫 문단 줄1 줄2', '둘째 문단', '　들여쓴 문단']);
     });
 
@@ -74,15 +120,44 @@ void main() {
       expect(t.paragraphs, ['日本語の テキスト'.replaceAll(' ', '')]);
     });
 
+    test('개행 없는 아주 긴 한 줄은 공백 기준으로 나눠 원문 그대로 이어 붙는다', () {
+      final line = '가나다라 ' * 5000; // 25,000자, 개행 없음
+      final t = ReaderText.build(line, joinLines: false);
+      expect(t.paragraphs.length, greaterThan(1));
+      expect(
+        t.paragraphs.every((p) => p.length <= ReaderText.maxParagraphChars),
+        isTrue,
+      );
+      expect(t.paragraphs.join(), line);
+      // 시작 위치는 오름차순이고 첫 조각은 0에서 시작한다.
+      expect(t.starts.first, 0);
+      for (var i = 1; i < t.starts.length; i++) {
+        expect(t.starts[i], greaterThan(t.starts[i - 1]));
+      }
+      // 공백이 전혀 없어도 잘라서 나눈다.
+      final blob = ReaderText.build('가' * 20000, joinLines: false);
+      expect(
+        blob.paragraphs.every((p) => p.length <= ReaderText.maxParagraphChars),
+        isTrue,
+      );
+      expect(blob.paragraphs.join(), '가' * 20000);
+    });
+
     test('CRLF와 빈 입력', () {
-      expect(ReaderText.build('a\r\nb', joinLines: false).paragraphs, ['a', 'b']);
+      expect(ReaderText.build('a\r\nb', joinLines: false).paragraphs, [
+        'a',
+        'b',
+      ]);
       final empty = ReaderText.build('', joinLines: true);
       expect(empty.paragraphs, ['']);
       expect(empty.starts, [0]);
     });
 
     test('paragraphIndexAt: 원문 위치로 문단을 찾는다', () {
-      final t = ReaderText.build('aaa\nbbb\nccc', joinLines: false); // starts 0,4,8
+      final t = ReaderText.build(
+        'aaa\nbbb\nccc',
+        joinLines: false,
+      ); // starts 0,4,8
       expect(t.paragraphIndexAt(0), 0);
       expect(t.paragraphIndexAt(3), 0);
       expect(t.paragraphIndexAt(4), 1);
@@ -120,17 +195,33 @@ void main() {
 
   group('ReaderSettings', () {
     test('JSON 왕복', () {
-      const s = ReaderSettings(fontSize: 22, font: '명조', joinLines: true, blueLight: 0.4, pageRatio: 0.7);
+      const s = ReaderSettings(
+        fontSize: 22,
+        font: '명조',
+        joinLines: true,
+        blueLight: 0.4,
+        pageRatio: 0.7,
+      );
       final back = ReaderSettings.fromJson(s.toJson());
       expect(back.fontSize, 22);
       expect(back.font, '명조');
       expect(back.joinLines, isTrue);
       expect(back.blueLight, 0.4);
       expect(back.pageRatio, 0.7);
+      expect(back.keepScreenOn, isTrue); // 기본값
+      expect(
+        ReaderSettings.fromJson({'keepScreenOn': false}).keepScreenOn,
+        isFalse,
+      );
     });
 
     test('범위를 벗어나거나 잘못된 값은 안전하게 보정', () {
-      final s = ReaderSettings.fromJson({'fontSize': 9999, 'font': '없는글꼴', 'dim': 'x', 'pageRatio': -3});
+      final s = ReaderSettings.fromJson({
+        'fontSize': 9999,
+        'font': '없는글꼴',
+        'dim': 'x',
+        'pageRatio': -3,
+      });
       expect(s.fontSize, 60);
       expect(s.font, '고딕');
       expect(s.dim, 0);
@@ -139,7 +230,12 @@ void main() {
 
     test('sameLayoutAs: 색은 레이아웃에 영향이 없고 글자 크기는 있다', () {
       const a = ReaderSettings();
-      expect(a.sameLayoutAs(a.copyWith(background: 0xFF000000, blueLight: 0.5, pageRatio: 0.5)), isTrue);
+      expect(
+        a.sameLayoutAs(
+          a.copyWith(background: 0xFF000000, blueLight: 0.5, pageRatio: 0.5),
+        ),
+        isTrue,
+      );
       expect(a.sameLayoutAs(a.copyWith(fontSize: 20)), isFalse);
       expect(a.sameLayoutAs(a.copyWith(joinLines: true)), isFalse);
     });
@@ -156,8 +252,17 @@ void main() {
       final key = ReaderStore.keyFor('소설.txt', 1234);
       store.settings = const ReaderSettings(fontSize: 25);
       store.positions[key] = 777;
-      store.bookmarksOf(key).add(const Bookmark(offset: 42, label: '여기', createdAt: 1));
-      store.addRecent(const RecentEntry(path: '/a/소설.txt', name: '소설.txt', size: 1234, openedAt: 5));
+      store
+          .bookmarksOf(key)
+          .add(const Bookmark(offset: 42, label: '여기', createdAt: 1));
+      store.addRecent(
+        const RecentEntry(
+          path: '/a/소설.txt',
+          name: '소설.txt',
+          size: 1234,
+          openedAt: 5,
+        ),
+      );
       await store.save();
 
       final again = ReaderStore(file);
@@ -170,10 +275,40 @@ void main() {
 
     test('같은 문서를 다시 열면 최근 목록 맨 앞으로 올라오고 중복되지 않는다', () {
       final store = ReaderStore(File('${dir.path}/x.json'));
-      store.addRecent(const RecentEntry(path: '/1', name: 'a.txt', size: 1, openedAt: 1));
-      store.addRecent(const RecentEntry(path: '/2', name: 'b.txt', size: 1, openedAt: 2));
-      store.addRecent(const RecentEntry(path: '/3', name: 'a.txt', size: 1, openedAt: 3));
+      store.addRecent(
+        const RecentEntry(path: '/1', name: 'a.txt', size: 1, openedAt: 1),
+      );
+      store.addRecent(
+        const RecentEntry(path: '/2', name: 'b.txt', size: 1, openedAt: 2),
+      );
+      store.addRecent(
+        const RecentEntry(path: '/3', name: 'a.txt', size: 1, openedAt: 3),
+      );
       expect(store.recents.map((r) => r.path), ['/3', '/2']);
+    });
+
+    test('위치 기록은 오래된 문서부터 지워 상한을 지키고, 최근에 읽은 문서는 유지한다', () {
+      final store = ReaderStore(File('${dir.path}/p.json'));
+      for (var i = 0; i < 10; i++) {
+        store.setPosition('doc$i', i, maxPositions: 5);
+      }
+      expect(store.positions.keys, ['doc5', 'doc6', 'doc7', 'doc8', 'doc9']);
+      store.setPosition('doc5', 99, maxPositions: 5); // 다시 읽으면 가장 최근으로
+      store.setPosition('doc10', 1, maxPositions: 5);
+      expect(store.positions.containsKey('doc5'), isTrue);
+      expect(store.positions.containsKey('doc6'), isFalse);
+    });
+
+    test('최근 문서에서 지운다', () {
+      final store = ReaderStore(File('${dir.path}/r.json'));
+      store.addRecent(
+        const RecentEntry(path: '/1', name: 'a.txt', size: 1, openedAt: 1),
+      );
+      store.addRecent(
+        const RecentEntry(path: '/2', name: 'b.txt', size: 2, openedAt: 2),
+      );
+      store.removeRecent('a.txt', 1);
+      expect(store.recents.map((r) => r.name), ['b.txt']);
     });
 
     test('손상된 파일은 기본값으로 시작한다', () async {

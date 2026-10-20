@@ -1,3 +1,5 @@
+import 'dart:math' as math;
+
 /// 검색 결과 하나. [paragraph]번째 문단 안의 [start, end) 구간.
 class SearchHit {
   const SearchHit(this.paragraph, this.start, this.end);
@@ -93,7 +95,40 @@ class ReaderText {
       paragraphs.add('');
       starts.add(0);
     }
-    return ReaderText(paragraphs, starts);
+    return _splitLong(paragraphs, starts);
+  }
+
+  /// 문단 하나의 글자 수 상한. 개행이 없는 파일(수십만 자가 한 줄)을 그대로 한 문단으로 두면
+  /// 글자 배치 계산이 화면을 멈추게 하므로, 이보다 긴 문단은 공백 기준으로 나눈다.
+  static const maxParagraphChars = 8000;
+
+  static ReaderText _splitLong(List<String> paragraphs, List<int> starts) {
+    if (!paragraphs.any((p) => p.length > maxParagraphChars)) {
+      return ReaderText(paragraphs, starts);
+    }
+    final outParagraphs = <String>[];
+    final outStarts = <int>[];
+    for (var i = 0; i < paragraphs.length; i++) {
+      final p = paragraphs[i];
+      if (p.length <= maxParagraphChars) {
+        outParagraphs.add(p);
+        outStarts.add(starts[i]);
+        continue;
+      }
+      var at = 0;
+      while (at < p.length) {
+        var end = math.min(at + maxParagraphChars, p.length);
+        if (end < p.length) {
+          // 가능하면 공백 뒤에서 자른다(단어 중간을 피하고, 이어 붙이면 원문이 그대로 나오게 한다).
+          final space = p.lastIndexOf(' ', end - 1);
+          if (space > at) end = space + 1;
+        }
+        outParagraphs.add(p.substring(at, end));
+        outStarts.add(starts[i] + at);
+        at = end;
+      }
+    }
+    return ReaderText(outParagraphs, outStarts);
   }
 
   /// 대소문자를 구분하지 않고 [query]를 찾는다. 결과는 최대 [limit]개.

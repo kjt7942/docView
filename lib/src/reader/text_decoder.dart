@@ -43,8 +43,21 @@ String decodeText(Uint8List bytes, Uint8List cp949Table) {
   try {
     return utf8.decode(bytes);
   } on FormatException {
-    return decodeCp949(bytes, cp949Table);
+    // 엄격한 UTF-8이 아니어도, 깨진 바이트가 조금 섞였거나 끝이 잘린 UTF-8 문서일 수 있다.
+    // 두 방식으로 모두 읽어 "읽을 수 없는 글자"가 더 적은 쪽을 고른다.
+    // (CP949 문서를 UTF-8로 읽으면 한글마다 깨져 압도적으로 많이 나온다.)
+    final asUtf8 = utf8.decode(bytes, allowMalformed: true);
+    final asCp949 = decodeCp949(bytes, cp949Table);
+    return _brokenCount(asUtf8) <= _brokenCount(asCp949) ? asUtf8 : asCp949;
   }
+}
+
+int _brokenCount(String text) {
+  var count = 0;
+  for (final unit in text.codeUnits) {
+    if (unit == 0xFFFD) count++;
+  }
+  return count;
 }
 
 String _decodeUtf16(Uint8List bytes, int start, Endian endian) {

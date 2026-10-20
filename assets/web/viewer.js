@@ -9,7 +9,10 @@
   var statusText = document.getElementById('status-text');
   var root = document.getElementById('root');
 
+  var finished = false; // ready 또는 error를 이미 알렸는지
+
   function post(payload) {
+    if (payload.type === 'ready' || payload.type === 'error') finished = true;
     try {
       if (window.DocumentBridge) {
         window.DocumentBridge.postMessage(JSON.stringify(payload));
@@ -328,9 +331,20 @@
     post({ type: 'ready', pages: host.querySelectorAll('[data-page-number]').length });
   }
 
-  // 일반 HWP는 hwp.js로, 암호 문서이거나 hwp.js가 못 여는 문서는 rhwp로 연다.
+  // 진짜 HWP 5.0 문서인지: OLE 컨테이너의 FileHeader가 "HWP Document File"로 시작한다.
+  function isHwp5(buffer) {
+    try {
+      var header = XLSX.CFB.find(XLSX.CFB.read(new Uint8Array(buffer), { type: 'array' }), 'FileHeader');
+      var c = header && header.content;
+      return !!c && String.fromCharCode.apply(null, Array.prototype.slice.call(c, 0, 17)) === 'HWP Document File';
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 일반 HWP 5.0은 hwp.js로, 그 밖의 문서(암호 문서, HWP 3.0, HWPML, 확장자만 .hwp인 HWPX 등)는 rhwp로 연다.
   async function renderHwp(buffer) {
-    if (typeof HwpJs === 'undefined' || hwpIsPasswordProtected(buffer)) {
+    if (typeof HwpJs === 'undefined' || !isHwp5(buffer) || hwpIsPasswordProtected(buffer)) {
       await renderRhwp(buffer);
       return;
     }
@@ -691,7 +705,30 @@
       setStatus(null);
     } catch (error) {
       root.hidden = true;
-      showError((error && error.message) || '문서를 여는 중 문제가 발생했습니다.');
+      showError(friendlyMessage(error));
     }
   })();
+
+  // 라이브러리가 던지는 영어 원문(zip 손상 등)을 사용자가 이해할 수 있는 말로 바꾼다.
+  function friendlyMessage(error) {
+    var message = (error && error.message) || String(error || '');
+    if (/zip|central directory|eocd|end of central/i.test(message)) {
+      return '파일이 손상되었거나 형식이 올바르지 않습니다. 다른 프로그램에서 열어 보거나 다시 내려받아 주세요.';
+    }
+    if (/UNSUPPORTED_FILE_FORMAT|유효하지 않은 파일/.test(message)) {
+      return '한글(HWP/HWPX) 문서가 아니거나 손상된 파일입니다.';
+    }
+    return message || '문서를 여는 중 문제가 발생했습니다.';
+  }
+
+  // 안전망: 라이브러리가 비동기로 실패하면(예외가 전달되지 않으면) 로딩 표시만 영원히 도는 문제가 있었다.
+  // 렌더링이 끝나기 전에 처리되지 않은 오류가 나면 화면에 알린다.
+  window.addEventListener('unhandledrejection', function (event) {
+    if (!finished) showError(friendlyMessage(event.reason) || '문서를 표시할 수 없습니다.');
+  });
+  window.addEventListener('error', function (event) {
+    // 브라우저가 무해하게 내는 ResizeObserver 알림은 오류가 아니다.
+    if (/ResizeObserver/i.test(event.message || '')) return;
+    if (!finished) showError(friendlyMessage(event.error || event.message));
+  });
 })();
