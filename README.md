@@ -262,6 +262,7 @@ flutter run -d emulator-5554 --release --dart-define=GITHUB_REPO=kjt7942/docView
 | TXT / CSV / MD | `07_txt.png` `08_csv.png` `09_md.png` |
 | 이미지 회전 | `10_image_rotated.png` |
 | HWP | `11_hwp.png` `13_hwp_table_page.png` |
+| 업데이트 안내 | `14_update_dialog.png` |
 | 외부 문서 열기 실패 안내 | `12_open_error.png` |
 
 ## 트러블슈팅 · 배운 점
@@ -298,6 +299,9 @@ flutter run -d emulator-5554 --release --dart-define=GITHUB_REPO=kjt7942/docView
     - 원인: `pathPattern`은 단순 glob이라 문자 클래스(`[pP]`)를 지원하지 않고(글자 그대로 취급), `.*`가 첫 번째 점에서 멈춰 이름에 점이 더 있는 경로에서 실패한다.
     - 해결: 지원 확장자마다 소문자·대문자 두 벌 × 점 0~3개 변형을 나열(`AndroidManifest.xml`). MIME 별칭(`image/jpg`, `application/x-msexcel`, `text/x-markdown` 등)도 추가하고 `MainActivity.kt`의 확장자 복원 표에 반영했다. 열 수 없는 확장자는 제외.
     - 검증: 14개 경로/MIME 조합을 질의해 지원 확장자는 모두 연결, `.doc` `.ppt` `.hwpx` `.zip` `.pdf.zip`은 연결되지 않음을 확인. MIME이 `octet-stream`인 HWP를 실제로 열어 표시까지 확인.
+16. **릴리스 워크플로우가 서명 키를 못 찾음** (v1.1.0 첫 빌드 실패): `validateSigningRelease` 단계에서 `Keystore file .../android/app/release.jks not found`. 워크플로우가 키를 `android/release.jks`에 썼는데 `app/build.gradle.kts`의 `storeFile`은 `android/app` 기준이다. 서명 시크릿을 처음 쓰는 이번에야 드러난 기존 버그였고, 키를 `android/app/`에 쓰도록 수정.
+17. **자동 업데이트 실측 검증**: 새 키로 서명한 1.0.3을 에뮬레이터에 설치 → 앱 시작 시 새 버전 안내(릴리스 노트 표시, `14_update_dialog.png`) → 다운로드 → 시스템 "Do you want to update this app?" → 1.1.0(versionCode 4) 덮어쓰기 설치 성공, 재실행 후 안내가 다시 뜨지 않음. 릴리스 APK 서명(SHA-256)이 로컬 키와 일치함도 `apksigner`로 확인.
+    - 이전에 v1.0.1·v1.0.2가 Pre-release였던 이유: 서명 시크릿이 없어 디버그 키로 올라갔고, 앱은 `releases/latest`(정식 릴리스)만 조회하므로 업데이트에 잡히지 않았다.
 
 배운 점: WebView + `file://` 조합은 `fetch()`가 막혀 로컬 서버가 필요하다. 그 서버를 안전하게 쓰려면 바인딩 주소(루프백), 토큰, 경로 허용 목록, 플랫폼별 평문 HTTP 정책을 함께 맞춰야 한다.
 
