@@ -45,6 +45,12 @@ class MainActivity : FlutterActivity() {
             "application/x-hwp-v5" to "hwp",
             "image/jpg" to "jpg",
             "text/x-log" to "log",
+            "application/msword" to "doc",
+            "application/vnd.ms-powerpoint" to "ppt",
+            "application/vnd.hancom.hwpx" to "hwpx",
+            "application/x-hwpx" to "hwpx",
+            "application/haansofthwpx" to "hwpx",
+            "application/hwp+zip" to "hwpx",
         )
     }
 

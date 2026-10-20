@@ -63,11 +63,17 @@
                 <data android:mimeType="application/x-hwp-v5" />
                 <data android:mimeType="image/jpg" />
                 <data android:mimeType="text/x-log" />
+                <data android:mimeType="application/msword" />
+                <data android:mimeType="application/vnd.ms-powerpoint" />
+                <data android:mimeType="application/vnd.hancom.hwpx" />
+                <data android:mimeType="application/x-hwpx" />
+                <data android:mimeType="application/haansofthwpx" />
+                <data android:mimeType="application/hwp+zip" />
             </intent-filter>
             <!-- MIME이 octet-stream 등으로 오는 파일은 확장자로 매칭한다.
                  pathPattern은 단순 glob이라 문자 클래스([pP])를 못 쓰고, ".*"가 첫 점에서 멈춰
                  앞에 점이 있는 경로에서 실패한다. 그래서 소문자/대문자 두 벌과 점 0~3개 변형을 나열한다.
-                 렌더러가 있는 확장자만 등록한다(.doc/.ppt/.hwpx는 열 수 없어 제외). -->
+                 렌더러가 있는 확장자만 등록한다. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -84,6 +90,14 @@
                 <data android:pathPattern=".*\\..*\\.PDF" />
                 <data android:pathPattern=".*\\..*\\..*\\.PDF" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.PDF" />
+                <data android:pathPattern=".*\\.doc" />
+                <data android:pathPattern=".*\\..*\\.doc" />
+                <data android:pathPattern=".*\\..*\\..*\\.doc" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.doc" />
+                <data android:pathPattern=".*\\.DOC" />
+                <data android:pathPattern=".*\\..*\\.DOC" />
+                <data android:pathPattern=".*\\..*\\..*\\.DOC" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.DOC" />
                 <data android:pathPattern=".*\\.docx" />
                 <data android:pathPattern=".*\\..*\\.docx" />
                 <data android:pathPattern=".*\\..*\\..*\\.docx" />
@@ -116,6 +130,14 @@
                 <data android:pathPattern=".*\\..*\\.CSV" />
                 <data android:pathPattern=".*\\..*\\..*\\.CSV" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.CSV" />
+                <data android:pathPattern=".*\\.ppt" />
+                <data android:pathPattern=".*\\..*\\.ppt" />
+                <data android:pathPattern=".*\\..*\\..*\\.ppt" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.ppt" />
+                <data android:pathPattern=".*\\.PPT" />
+                <data android:pathPattern=".*\\..*\\.PPT" />
+                <data android:pathPattern=".*\\..*\\..*\\.PPT" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.PPT" />
                 <data android:pathPattern=".*\\.pptx" />
                 <data android:pathPattern=".*\\..*\\.pptx" />
                 <data android:pathPattern=".*\\..*\\..*\\.pptx" />
@@ -132,6 +154,14 @@
                 <data android:pathPattern=".*\\..*\\.HWP" />
                 <data android:pathPattern=".*\\..*\\..*\\.HWP" />
                 <data android:pathPattern=".*\\..*\\..*\\..*\\.HWP" />
+                <data android:pathPattern=".*\\.hwpx" />
+                <data android:pathPattern=".*\\..*\\.hwpx" />
+                <data android:pathPattern=".*\\..*\\..*\\.hwpx" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.hwpx" />
+                <data android:pathPattern=".*\\.HWPX" />
+                <data android:pathPattern=".*\\..*\\.HWPX" />
+                <data android:pathPattern=".*\\..*\\..*\\.HWPX" />
+                <data android:pathPattern=".*\\..*\\..*\\..*\\.HWPX" />
                 <data android:pathPattern=".*\\.txt" />
                 <data android:pathPattern=".*\\..*\\.txt" />
                 <data android:pathPattern=".*\\..*\\..*\\.txt" />

@@ -43,6 +43,100 @@
     return el;
   }
 
+  /* ---------------- 비밀번호 ---------------- */
+
+  // 비밀번호를 묻고, 취소하면 null을 돌려준다.
+  function askPassword(message) {
+    return new Promise(function (resolve) {
+      setStatus(null);
+      var backdrop = document.createElement('div');
+      backdrop.className = 'pw-backdrop';
+      var form = document.createElement('form');
+      form.className = 'pw-dialog';
+      var title = document.createElement('h2');
+      title.textContent = '비밀번호 입력';
+      var msg = document.createElement('p');
+      msg.className = 'pw-msg';
+      msg.textContent = message;
+      var input = document.createElement('input');
+      input.type = 'password';
+      input.className = 'pw-input';
+      input.autocomplete = 'off';
+      input.setAttribute('autocapitalize', 'off');
+      input.spellcheck = false;
+      input.setAttribute('aria-label', '비밀번호');
+      var actions = document.createElement('div');
+      actions.className = 'pw-actions';
+      var cancel = document.createElement('button');
+      cancel.type = 'button';
+      cancel.className = 'pw-cancel';
+      cancel.textContent = '취소';
+      var ok = document.createElement('button');
+      ok.type = 'submit';
+      ok.className = 'pw-ok';
+      ok.textContent = '확인';
+      actions.appendChild(cancel);
+      actions.appendChild(ok);
+      [title, msg, input, actions].forEach(function (el) {
+        form.appendChild(el);
+      });
+      backdrop.appendChild(form);
+      document.body.appendChild(backdrop);
+      input.focus();
+
+      function done(value) {
+        backdrop.remove();
+        resolve(value);
+      }
+      cancel.addEventListener('click', function () {
+        done(null);
+      });
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
+        if (input.value) done(input.value);
+      });
+    });
+  }
+
+  var CANCELED = '암호로 보호된 문서입니다. 비밀번호를 입력해야 열 수 있습니다.';
+
+  // 암호가 걸린 docx/xlsx/pptx(OLE 컨테이너)는 평문 zip으로 풀어서 돌려준다. 아니면 그대로 돌려준다.
+  async function unlockOffice(buffer) {
+    var bytes = new Uint8Array(buffer);
+    if (typeof OfficeCrypto === 'undefined' || !OfficeCrypto.isEncryptedPackage(bytes)) return buffer;
+    var message = '이 문서는 암호로 보호되어 있습니다.';
+    for (;;) {
+      var password = await askPassword(message);
+      if (password === null) throw new Error(CANCELED);
+      setStatus('비밀번호 확인 중…');
+      try {
+        var plain = await OfficeCrypto.decrypt(bytes, password);
+        setStatus('문서를 여는 중…');
+        return plain.buffer;
+      } catch (e) {
+        if (e && e.code === 'BAD_PASSWORD') {
+          message = '비밀번호가 맞지 않습니다. 다시 입력해 주세요.';
+          continue;
+        }
+        throw e;
+      }
+    }
+  }
+
+  // HWP 5.0 FileHeader의 속성 비트 1이 "암호 설정"이다. 이런 문서는 hwp.js가 못 열어 rhwp로 보낸다.
+  function hwpIsPasswordProtected(buffer) {
+    var header;
+    try {
+      header = XLSX.CFB.find(XLSX.CFB.read(new Uint8Array(buffer), { type: 'array' }), 'FileHeader');
+    } catch (e) {
+      return false;
+    }
+    var c = header && header.content;
+    if (!c || c.length < 40) return false;
+    var flags = c[36] | (c[37] << 8) | (c[38] << 16) | (c[39] << 24);
+    return (flags & 2) !== 0;
+  }
+
   async function loadBytes() {
     // 토큰은 현재 페이지 경로(/<token>/viewer.html)에 있으므로 상대 경로로 요청한다.
     var res = await fetch('file', { cache: 'no-store' });
@@ -86,8 +180,25 @@
 
   /* ---------------- XLSX / CSV ---------------- */
 
-  function renderXlsx(buffer) {
-    var wb = XLSX.read(new Uint8Array(buffer), { type: 'array', cellDates: true });
+  async function readWorkbook(buffer) {
+    var data = new Uint8Array(buffer);
+    var password;
+    for (;;) {
+      try {
+        return XLSX.read(data, { type: 'array', cellDates: true, password: password });
+      } catch (e) {
+        if (!/password/i.test((e && e.message) || '')) throw e;
+        var next = await askPassword(
+          password === undefined ? '이 문서는 암호로 보호되어 있습니다.' : '비밀번호가 맞지 않습니다. 다시 입력해 주세요.',
+        );
+        if (next === null) throw new Error(CANCELED);
+        password = next;
+      }
+    }
+  }
+
+  async function renderXlsx(buffer) {
+    var wb = await readWorkbook(buffer);
     var names = wb.SheetNames || [];
     if (!names.length) throw new Error('시트를 찾을 수 없습니다.');
 
@@ -196,16 +307,20 @@
 
   /* ---------------- HWP 5.0 ---------------- */
 
-  function renderHwp(buffer) {
-    if (typeof HwpJs === 'undefined') throw new Error('HWP 렌더러를 찾을 수 없습니다.');
+  function renderHwpJs(buffer) {
     var host = document.createElement('div');
     host.className = 'hwp-host';
     root.appendChild(host);
-    // Viewer가 내부에서 parse까지 수행한다.
-    // CFB 파서는 일반 숫자 배열 + type:'array'를 기대한다(Uint8Array/ArrayBuffer는 실패).
-    new HwpJs.Viewer(host, Array.from(new Uint8Array(buffer)), {
-      type: 'array',
-    });
+    try {
+      // Viewer가 내부에서 parse까지 수행한다.
+      // CFB 파서는 일반 숫자 배열 + type:'array'를 기대한다(Uint8Array/ArrayBuffer는 실패).
+      new HwpJs.Viewer(host, Array.from(new Uint8Array(buffer)), {
+        type: 'array',
+      });
+    } catch (e) {
+      host.remove();
+      throw e;
+    }
     // 페이지는 margin:auto로 가운데 정렬되므로 페이지 각각이 아니라 컨테이너 전체를 줄인다.
     fitToWidth('.hwp-host div[data-page-number]:not(.hwpjs-observer):first-of-type', function (page) {
       return page.parentElement;
@@ -213,15 +328,183 @@
     post({ type: 'ready', pages: host.querySelectorAll('[data-page-number]').length });
   }
 
-  /* ---------------- TEXT / IMAGE ---------------- */
+  // 일반 HWP는 hwp.js로, 암호 문서이거나 hwp.js가 못 여는 문서는 rhwp로 연다.
+  async function renderHwp(buffer) {
+    if (typeof HwpJs === 'undefined' || hwpIsPasswordProtected(buffer)) {
+      await renderRhwp(buffer);
+      return;
+    }
+    try {
+      renderHwpJs(buffer);
+    } catch (e) {
+      await renderRhwp(buffer);
+    }
+  }
 
-  function renderText(buffer) {
-    var pre = document.createElement('pre');
-    pre.className = 'text-doc';
-    pre.textContent = new TextDecoder('utf-8').decode(buffer);
-    root.appendChild(pre);
+  /* ---------------- HWP / HWPX (rhwp: Rust + WebAssembly) ---------------- */
+
+  var rhwpReady = null;
+
+  function loadRhwp() {
+    if (typeof Rhwp === 'undefined') return Promise.reject(new Error('HWPX 렌더러를 찾을 수 없습니다.'));
+    if (!rhwpReady) {
+      var ctx = null;
+      var lastFont = '';
+      // rhwp가 글자 폭을 잴 때 호출하는 전역 함수(필수).
+      window.measureTextWidth = function (font, text) {
+        if (!ctx) ctx = document.createElement('canvas').getContext('2d');
+        if (font !== lastFont) {
+          ctx.font = font;
+          lastFont = font;
+        }
+        return ctx.measureText(text).width;
+      };
+      rhwpReady = Rhwp.default({ module_or_path: 'vendor/rhwp_bg.wasm' });
+    }
+    return rhwpReady;
+  }
+
+  // 암호가 필요하면 비밀번호를 물어 연다. 틀리면 다시 묻고, 취소하면 오류로 끝낸다.
+  async function openRhwp(buffer) {
+    setStatus('문서를 여는 중…');
+    await loadRhwp();
+    var bytes = new Uint8Array(buffer);
+    try {
+      return new Rhwp.HwpDocument(bytes);
+    } catch (e) {
+      if (String(e).indexOf('비밀번호가 필요') < 0) throw e;
+    }
+    var message = '이 문서는 암호로 보호되어 있습니다.';
+    for (;;) {
+      var password = await askPassword(message);
+      if (password === null) throw new Error(CANCELED);
+      setStatus('문서를 여는 중…');
+      try {
+        return Rhwp.HwpDocument.openWithPassword(bytes, password);
+      } catch (e) {
+        if (String(e).indexOf('비밀번호가 일치하지 않') < 0) throw e;
+        message = '비밀번호가 맞지 않습니다. 다시 입력해 주세요.';
+      }
+    }
+  }
+
+  async function renderRhwp(buffer) {
+    var doc = await openRhwp(buffer);
+    var total = doc.pageCount();
+    if (!total) throw new Error('표시할 페이지가 없습니다.');
+
+    var host = document.createElement('div');
+    host.className = 'rhwp-host';
+    root.appendChild(host);
+
+    function ratioOf(svg) {
+      return svg.getAttribute('width') + ' / ' + svg.getAttribute('height');
+    }
+
+    // 첫 페이지 크기를 기준으로 모든 페이지의 자리를 잡고, 화면 근처 페이지만 그린다.
+    var probe = document.createElement('div');
+    probe.innerHTML = doc.renderPageSvg(0);
+    var defaultRatio = probe.firstElementChild ? ratioOf(probe.firstElementChild) : '793 / 1122';
+
+    var observer = new IntersectionObserver(
+      function (entries) {
+        entries.forEach(function (entry) {
+          var el = entry.target;
+          if (entry.isIntersecting) {
+            if (el.firstChild) return;
+            el.innerHTML = doc.renderPageSvg(Number(el.dataset.index));
+            var svg = el.firstElementChild;
+            if (!svg) return;
+            if (!svg.getAttribute('viewBox')) {
+              svg.setAttribute('viewBox', '0 0 ' + svg.getAttribute('width') + ' ' + svg.getAttribute('height'));
+            }
+            el.style.aspectRatio = ratioOf(svg); // 비워도 높이가 유지된다.
+          } else if (el.firstChild) {
+            el.textContent = ''; // 멀어진 페이지는 비워 메모리를 아낀다.
+          }
+        });
+      },
+      { rootMargin: '1200px 0px' },
+    );
+
+    for (var i = 0; i < total; i++) {
+      var el = document.createElement('div');
+      el.className = 'rhwp-page';
+      el.dataset.index = String(i);
+      el.style.aspectRatio = defaultRatio;
+      host.appendChild(el);
+      observer.observe(el);
+    }
+    post({ type: 'ready', pages: total });
+  }
+
+  /* ---------------- DOC (구형 Word 97-2003) ---------------- */
+
+  function renderDoc(buffer) {
+    if (typeof MsDoc === 'undefined') throw new Error('DOC 렌더러를 찾을 수 없습니다.');
+    var out;
+    try {
+      out = MsDoc.renderMsDoc(MsDoc.parseMsDoc(buffer));
+    } catch (e) {
+      if (/encrypt/i.test(String((e && e.message) || ''))) {
+        throw new Error('암호가 설정된 .doc 문서는 열 수 없습니다. Word에서 암호를 해제하고 저장한 뒤 다시 열어 주세요.');
+      }
+      throw e;
+    }
+    var paper = document.createElement('article');
+    paper.className = 'doc-paper';
+    paper.innerHTML = '<style>' + out.css + '</style><div class="msdoc-root">' + out.html + '</div>';
+    root.appendChild(paper);
+
+    // 표·이미지가 화면보다 넓으면 본문 전체를 폭에 맞춰 줄인다(이미지는 늦게 로드되므로 load에도 다시 잰다).
+    var body = paper.querySelector('.msdoc-root');
+    function fit() {
+      body.style.zoom = '';
+      var avail = paper.clientWidth - 32; // .doc-paper 좌우 패딩
+      if (body.scrollWidth > avail) body.style.zoom = String(avail / body.scrollWidth);
+    }
+    fit();
+    paper.querySelectorAll('img').forEach(function (img) {
+      img.addEventListener('load', fit);
+    });
+    window.addEventListener('resize', fit);
     post({ type: 'ready' });
   }
+
+  /* ---------------- PPT (구형 PowerPoint 97-2003: 텍스트만) ---------------- */
+
+  function renderPpt(buffer) {
+    if (typeof PptText === 'undefined') throw new Error('PPT 렌더러를 찾을 수 없습니다.');
+    var slides = PptText.parse(buffer);
+    if (!slides.length) throw new Error('슬라이드를 찾을 수 없습니다.');
+
+    root.appendChild(
+      note('구형 .ppt는 슬라이드의 텍스트만 표시합니다. 도형과 이미지까지 보려면 PowerPoint에서 .pptx로 저장해 주세요.'),
+    );
+    slides.forEach(function (slide, i) {
+      var card = document.createElement('section');
+      card.className = 'ppt-card';
+      var label = document.createElement('div');
+      label.className = 'slide-index';
+      label.textContent = i + 1 + ' / ' + slides.length;
+      card.appendChild(label);
+      if (slide.title.length) {
+        var h = document.createElement('h2');
+        h.textContent = slide.title.join(' ');
+        card.appendChild(h);
+      }
+      slide.body.forEach(function (line) {
+        var p = document.createElement('p');
+        p.textContent = line;
+        card.appendChild(p);
+      });
+      if (!slide.title.length && !slide.body.length) card.appendChild(note('(텍스트 없음)'));
+      root.appendChild(card);
+    });
+    post({ type: 'ready', pages: slides.length });
+  }
+
+  /* ---------------- MARKDOWN / IMAGE ---------------- */
 
   function escapeHtml(s) {
     return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -382,16 +665,22 @@
       var buffer = await loadBytes();
       root.hidden = false;
 
+      if (kind === 'docx' || kind === 'xlsx' || kind === 'pptx') buffer = await unlockOffice(buffer);
+
       if (kind === 'docx') {
         await renderDocx(buffer);
       } else if (kind === 'xlsx') {
-        renderXlsx(buffer);
+        await renderXlsx(buffer);
       } else if (kind === 'pptx') {
         await renderPptx(buffer);
       } else if (kind === 'hwp') {
-        renderHwp(buffer);
-      } else if (kind === 'text') {
-        renderText(buffer);
+        await renderHwp(buffer);
+      } else if (kind === 'hwpx') {
+        await renderRhwp(buffer);
+      } else if (kind === 'doc') {
+        renderDoc(buffer);
+      } else if (kind === 'ppt') {
+        renderPpt(buffer);
       } else if (kind === 'markdown') {
         renderMarkdown(buffer);
       } else if (kind === 'image') {

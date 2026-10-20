@@ -15,6 +15,8 @@ const WORK = fs.mkdtempSync(path.join(os.tmpdir(), 'docviewer-web-'));
 const PACKAGES = [
   'pptx-browser@4.1.5',
   'hwp.js@0.0.3',
+  '@rhwp/core@0.8.7',
+  '@file-viewer/doc@3.2.2',
   'docx-preview@0.4.1',
   'jszip@3.10.1',
   'xlsx@0.18.5',
@@ -115,7 +117,33 @@ run(esbuild, [
   '--outfile=out/hwp.min.js',
 ]);
 
+// rhwp(Rust/WASM): HWPX와 암호가 걸린 HWP/HWPX. 번들은 IIFE 전역 Rhwp(기본 export = init)로 노출한다.
+run(esbuild, [
+  'node_modules/@rhwp/core/rhwp.js',
+  '--bundle',
+  '--format=iife',
+  '--global-name=Rhwp',
+  '--minify',
+  '--outfile=out/rhwp.min.js',
+]);
+// 구형 .doc(MS-DOC 바이너리) 파서/HTML 렌더러. 전역 MsDoc(parseMsDoc, renderMsDoc).
+run(esbuild, [
+  'node_modules/@file-viewer/doc/dist/index.js',
+  '--bundle',
+  '--format=iife',
+  '--global-name=MsDoc',
+  '--minify',
+  '--outfile=out/msdoc.min.js',
+]);
+
 console.log('[4/4] vendor 복사');
+fs.copyFileSync(path.join(WORK, 'out', 'rhwp.min.js'), path.join(VENDOR, 'rhwp.min.js'));
+fs.copyFileSync(path.join(WORK, 'node_modules', '@rhwp', 'core', 'rhwp_bg.wasm'), path.join(VENDOR, 'rhwp_bg.wasm'));
+fs.copyFileSync(path.join(WORK, 'out', 'msdoc.min.js'), path.join(VENDOR, 'msdoc.min.js'));
+// 서드파티 라이선스 동봉
+const LICENSES = path.join(ROOT, 'assets', 'third_party_licenses');
+fs.copyFileSync(path.join(WORK, 'node_modules', '@rhwp', 'core', 'LICENSE'), path.join(LICENSES, 'rhwp.txt'));
+fs.copyFileSync(path.join(WORK, 'node_modules', '@file-viewer', 'doc', 'LICENSE'), path.join(LICENSES, 'file-viewer-doc.txt'));
 fs.mkdirSync(VENDOR, { recursive: true });
 fs.copyFileSync(path.join(WORK, 'out', 'pptx-browser.js'), path.join(VENDOR, 'pptx-browser.js'));
 fs.copyFileSync(path.join(WORK, 'out', 'hwp.min.js'), path.join(VENDOR, 'hwp.min.js'));

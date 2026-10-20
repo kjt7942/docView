@@ -47,7 +47,7 @@ class UnsupportedFormatScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: 8),
                 Text(
-                  'PDF, DOCX, XLSX, PPTX, HWP 5.0, TXT, 이미지 파일을 열 수 있습니다.\n'
+                  'PDF, DOC/DOCX, XLS/XLSX, PPT/PPTX, HWP/HWPX, TXT, 이미지 파일을 열 수 있습니다.\n'
                   '다른 이름으로 저장에서 PDF나 DOCX로 변환하면 바로 볼 수 있습니다.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: theme.colorScheme.onSurfaceVariant,

@@ -91,11 +91,6 @@ enum DocumentFormat {
     if (dot < 0 || dot == fileName.length - 1) return '';
     return fileName.substring(dot + 1).toLowerCase();
   }
-
-  /// 파일 선택 다이얼로그에 넘길 확장자 목록.
-  static List<String> get allExtensions => [
-    for (final format in DocumentFormat.values) ...format.extensions,
-  ];
 }
 
 /// 기기에서 열기로 선택된 문서 하나.
@@ -117,15 +112,15 @@ class DocumentFile {
   String get extension => DocumentFormat._extensionOf(name);
 
   /// WebView 렌더러가 처리할 수 있는 형식이면 렌더러 종류를 돌려준다.
-  ///
-  /// 레거시 바이너리 형식(.doc/.ppt)과 HWPX는 아직 렌더러가 없다.
   String? get webKind => switch (extension) {
     'docx' => 'docx',
+    'doc' => 'doc',
+    'ppt' => 'ppt',
+    'hwpx' => 'hwpx',
     'xlsx' || 'xls' || 'csv' => 'xlsx',
     'pptx' => 'pptx',
     'hwp' => 'hwp',
     'md' => 'markdown',
-    'txt' || 'log' => 'text',
     'jpg' || 'jpeg' || 'png' || 'gif' || 'webp' || 'bmp' => 'image',
     _ => null,
   };
