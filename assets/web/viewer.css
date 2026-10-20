@@ -127,27 +127,25 @@ html, body {
 
 .sheet-host table {
   border-collapse: collapse;
+  table-layout: fixed;
   font-size: 12px;
-  min-width: 100%;
 }
 
 .sheet-host th,
 .sheet-host td {
   border: 1px solid var(--border);
-  padding: 4px 8px;
+  padding: 2px 4px;
+  height: 20px;
   text-align: left;
-  white-space: pre-wrap;
-  vertical-align: top;
-  max-width: 320px;
-  overflow-wrap: anywhere;
+  vertical-align: middle;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
-.sheet-host tr:first-child td {
-  background: var(--bg);
-  font-weight: 600;
-  position: sticky;
-  top: 0;
-}
+.sheet-host td.num { text-align: right; }
+.sheet-host td.ctr { text-align: center; }
+.sheet-host td.wrap { white-space: pre-wrap; vertical-align: top; overflow-wrap: anywhere; }
 
 .sheet-note,
 .render-note {

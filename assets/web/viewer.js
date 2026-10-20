@@ -188,7 +188,13 @@
     var password;
     for (;;) {
       try {
-        return XLSX.read(data, { type: 'array', cellDates: true, password: password });
+        return XLSX.read(data, {
+          type: 'array',
+          cellDates: true,
+          // 열 너비(!cols)·행 높이(!rows)·숨김은 cellStyles가 true일 때만 파싱된다.
+          cellStyles: true,
+          password: password,
+        });
       } catch (e) {
         if (!/password/i.test((e && e.message) || '')) throw e;
         var next = await askPassword(
@@ -198,6 +204,156 @@
         password = next;
       }
     }
+  }
+
+  /* 엑셀 열 너비/행 높이/병합/숨김을 반영해 <table>을 만든다. */
+  var DEFAULT_COL_PX = 64;
+  var AUTO_COL_MIN = 48;
+  var AUTO_COL_MAX = 320;
+
+  // 글자 폭 추정(px): 전각(한글 등) 13, 반각 7. 여러 줄이면 가장 긴 줄 기준.
+  function estimateTextWidth(text) {
+    var widest = 0;
+    String(text).split('\n').forEach(function (line) {
+      var w = 0;
+      for (var i = 0; i < line.length; i++) w += line.charCodeAt(i) > 255 ? 13 : 7;
+      if (w > widest) widest = w;
+    });
+    return widest + 10;
+  }
+
+  function colInfoWidth(info) {
+    if (!info) return null;
+    if (info.wpx > 0) return info.wpx;
+    if (info.wch > 0) return Math.round(info.wch * 7 + 5);
+    if (info.width > 0) return Math.round(info.width * 7 + 5);
+    return null;
+  }
+
+  function rowInfoHeight(info) {
+    if (!info) return null;
+    if (info.hpx > 0) return info.hpx;
+    if (info.hpt > 0) return Math.round((info.hpt * 4) / 3);
+    return null;
+  }
+
+  function buildSheetTable(ws, range, endRow, endCol) {
+    var r0 = range.s.r;
+    var c0 = range.s.c;
+    var colsInfo = ws['!cols'];
+    var rowsInfo = ws['!rows'];
+    var hasColInfo = !!(colsInfo && colsInfo.length);
+
+    function cellAt(r, c) {
+      return ws[XLSX.utils.encode_cell({ r: r, c: c })];
+    }
+    function textAt(r, c) {
+      var cell = cellAt(r, c);
+      if (!cell) return '';
+      if (cell.w != null) return String(cell.w);
+      return cell.v == null ? '' : String(cell.v);
+    }
+    function rowHidden(r) {
+      return !!(rowsInfo && rowsInfo[r] && rowsInfo[r].hidden);
+    }
+    function colHidden(c) {
+      return !!(colsInfo && colsInfo[c] && colsInfo[c].hidden);
+    }
+
+    // 열 너비: 파일에 있으면 그대로, 열 정보가 아예 없는 시트(CSV 등)는 내용으로 추정.
+    var colWidth = [];
+    for (var c = c0; c <= endCol; c++) {
+      var w = colInfoWidth(colsInfo && colsInfo[c]);
+      if (w == null) {
+        if (hasColInfo) {
+          w = DEFAULT_COL_PX;
+        } else {
+          w = AUTO_COL_MIN;
+          for (var rr = r0; rr <= endRow; rr++) {
+            var est = estimateTextWidth(textAt(rr, c));
+            if (est > w) w = est;
+            if (w >= AUTO_COL_MAX) break;
+          }
+          w = Math.min(w, AUTO_COL_MAX);
+        }
+      }
+      colWidth[c] = w;
+    }
+
+    // 병합 셀: 표시 범위 안의 기준 셀에만 colspan/rowspan을 주고 나머지는 건너뛴다.
+    var anchors = {};
+    var covered = {};
+    (ws['!merges'] || []).forEach(function (m) {
+      if (m.s.r < r0 || m.s.r > endRow || m.s.c < c0 || m.s.c > endCol) return;
+      var er = Math.min(m.e.r, endRow);
+      var ec = Math.min(m.e.c, endCol);
+      var rowspan = 0;
+      var colspan = 0;
+      for (var r = m.s.r; r <= er; r++) if (!rowHidden(r)) rowspan++;
+      for (var c = m.s.c; c <= ec; c++) if (!colHidden(c)) colspan++;
+      anchors[m.s.r + ',' + m.s.c] = { rowspan: Math.max(rowspan, 1), colspan: Math.max(colspan, 1) };
+      for (var r2 = m.s.r; r2 <= er; r2++) {
+        for (var c2 = m.s.c; c2 <= ec; c2++) {
+          if (r2 !== m.s.r || c2 !== m.s.c) covered[r2 + ',' + c2] = true;
+        }
+      }
+    });
+
+    var table = document.createElement('table');
+    var colgroup = document.createElement('colgroup');
+    var total = 0;
+    for (var cc = c0; cc <= endCol; cc++) {
+      if (colHidden(cc)) continue;
+      var col = document.createElement('col');
+      col.style.width = colWidth[cc] + 'px';
+      colgroup.appendChild(col);
+      total += colWidth[cc];
+    }
+    table.appendChild(colgroup);
+    table.style.width = total + 'px';
+
+    for (var r = r0; r <= endRow; r++) {
+      if (rowHidden(r)) continue;
+      var tr = document.createElement('tr');
+      var height = rowInfoHeight(rowsInfo && rowsInfo[r]);
+      if (height) tr.style.height = height + 'px';
+
+      for (var c = c0; c <= endCol; c++) {
+        var key = r + ',' + c;
+        if (colHidden(c) || covered[key]) continue;
+
+        var cell = cellAt(r, c);
+        var text = textAt(r, c);
+        var td = document.createElement('td');
+        td.textContent = text;
+        if (cell && cell.t === 'n') td.className = 'num';
+        else if (cell && (cell.t === 'b' || cell.t === 'e')) td.className = 'ctr';
+
+        var merge = anchors[key];
+        if (merge) {
+          if (merge.colspan > 1) td.colSpan = merge.colspan;
+          if (merge.rowspan > 1) td.rowSpan = merge.rowspan;
+        } else if (text && !(cell && cell.t === 'n') && text.indexOf('\n') < 0) {
+          // 엑셀처럼 긴 글자는 오른쪽의 빈 셀 위로 넘쳐 보이게 한다.
+          var need = estimateTextWidth(text);
+          var have = colWidth[c];
+          var span = 1;
+          for (var n = c + 1; n <= endCol && have < need; n++) {
+            if (colHidden(n)) continue;
+            var k = r + ',' + n;
+            if (covered[k] || anchors[k] || textAt(r, n)) break;
+            covered[k] = true;
+            have += colWidth[n];
+            span++;
+          }
+          if (span > 1) td.colSpan = span;
+        }
+        if (text.indexOf('\n') >= 0) td.classList.add('wrap');
+        tr.appendChild(td);
+      }
+      table.appendChild(tr);
+    }
+    return table;
   }
 
   async function renderXlsx(buffer) {
@@ -229,25 +385,7 @@
       var endRow = Math.min(range.e.r, range.s.r + MAX_ROWS - 1);
       var endCol = Math.min(range.e.c, range.s.c + MAX_COLS - 1);
 
-      var rows = XLSX.utils.sheet_to_json(ws, {
-        header: 1,
-        raw: false,
-        defval: '',
-        blankrows: true,
-        range: { s: { r: range.s.r, c: range.s.c }, e: { r: endRow, c: endCol } },
-      });
-
-      var table = document.createElement('table');
-      rows.forEach(function (row) {
-        var tr = document.createElement('tr');
-        (row || []).forEach(function (value) {
-          var td = document.createElement('td');
-          td.textContent = value == null ? '' : String(value);
-          tr.appendChild(td);
-        });
-        table.appendChild(tr);
-      });
-      host.appendChild(table);
+      host.appendChild(buildSheetTable(ws, range, endRow, endCol));
 
       var hiddenRows = range.e.r - endRow;
       var hiddenCols = range.e.c - endCol;
