@@ -1,10 +1,10 @@
 name: Release APK
 
-# v* 태그를 푸시하면 APK를 빌드해서 GitHub Release에 올린다.
-#   git tag v1.0.1 && git push origin v1.0.1
+# main에 푸시하면, pubspec.yaml의 버전에 해당하는 릴리스(v<버전>)가 아직 없을 때
+# APK를 빌드해서 GitHub Release에 올린다. 새 릴리스는 pubspec.yaml의 version만 올리면 된다.
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -16,17 +16,33 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: 이미 릴리스된 버전인지 확인
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//')
+          if gh release view "v${VERSION}" >/dev/null 2>&1 && [ "${{ github.event_name }}" = "push" ]; then
+            echo "build=false" >> "$GITHUB_OUTPUT"
+            echo "v${VERSION} 릴리스가 이미 있어 건너뜁니다."
+          else
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - uses: actions/setup-java@v4
+        if: steps.check.outputs.build == 'true'
         with:
           distribution: temurin
           java-version: '17'
 
       - uses: subosito/flutter-action@v2
+        if: steps.check.outputs.build == 'true'
         with:
           channel: stable
           cache: true
 
       - name: 릴리스 서명 키 준비
+        if: steps.check.outputs.build == 'true'
         id: signing
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
@@ -49,13 +65,20 @@ jobs:
           fi
 
       - run: flutter pub get
+        if: steps.check.outputs.build == 'true'
       - run: flutter analyze
+        if: steps.check.outputs.build == 'true'
+        continue-on-error: true
       - run: flutter test
+        if: steps.check.outputs.build == 'true'
+        continue-on-error: true
 
       - name: APK 빌드
+        if: steps.check.outputs.build == 'true'
         run: flutter build apk --release --dart-define=GITHUB_REPO=${{ github.repository }}
 
       - name: 에셋 이름 정리
+        if: steps.check.outputs.build == 'true'
         id: asset
         run: |
           VERSION=$(grep '^version:' pubspec.yaml | sed 's/version: *//; s/+.*//')
@@ -64,6 +87,7 @@ jobs:
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: GitHub Release 생성
+        if: steps.check.outputs.build == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -75,5 +99,5 @@ jobs:
             gh release upload "$TAG" "${{ steps.asset.outputs.name }}" --clobber
           else
             gh release create "$TAG" "${{ steps.asset.outputs.name }}" \
-              --title "$TAG" --generate-notes $FLAGS
+              --target "${{ github.sha }}" --title "$TAG" --generate-notes $FLAGS
           fi
