@@ -7,6 +7,9 @@ import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.core.content.FileProvider
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.WindowInsetsControllerCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
@@ -142,6 +145,24 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        // 다이얼로그·파일 선택기·앱 전환에서 돌아올 때마다 다시 숨긴다.
+        if (hasFocus) hideNavigationBar()
+    }
+
+    /**
+     * 하단 내비게이션 바(3버튼/제스처 바)를 숨겨 문서를 넓게 본다.
+     * 화면 아래에서 위로 스와이프하면 잠시 나타났다가 자동으로 다시 숨는다.
+     * 상태바는 그대로 둔다.
+     */
+    private fun hideNavigationBar() {
+        val controller = WindowCompat.getInsetsController(window, window.decorView)
+        controller.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        controller.hide(WindowInsetsCompat.Type.navigationBars())
     }
 
     override fun onNewIntent(intent: Intent) {
