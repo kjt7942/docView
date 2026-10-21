@@ -100,6 +100,23 @@ render = render.replace(
 );
 fs.writeFileSync(renderPath, render);
 
+// @file-viewer/doc 3.2.2 의 표 복원(normalizeRowEndOnlyTables)은 앞 행과 "표 모양이 같은지"를
+// 첫 열 왼쪽/마지막 열 오른쪽 경계만으로 비교한다. 열 구성이 다른 두 표의 전체 폭이 같으면
+// 같은 표로 착각해, 두 표 사이의 본문 전체가 표 셀 안으로 빨려 들어가 글자가 한 줄에 한 글자씩
+// 보이게 된다. 모든 열 경계를 함께 비교하도록 고친다.
+console.log('[2/4] @file-viewer/doc 표 구분 패치');
+const docParserPath = path.join(WORK, 'node_modules', '@file-viewer', 'doc', 'dist', 'msdoc', 'parser.js');
+let docParser = fs.readFileSync(docParserPath, 'utf8');
+const sigAnchor = "        cells[cells.length - 1]?.rightBoundary ?? '',";
+if (!docParser.includes(sigAnchor)) {
+  throw new Error('@file-viewer/doc 표 패치 지점을 찾지 못했습니다(버전 변경 확인).');
+}
+docParser = docParser.replace(
+  sigAnchor,
+  sigAnchor + "\n        cells.map((cell) => cell.rightBoundary ?? '').join(','),",
+);
+fs.writeFileSync(docParserPath, docParser);
+
 // hwp.js 0.0.3 splitTable은 첫 행이 한 페이지보다 높으면 같은 표로 무한 재귀한다
 // ("Maximum call stack size exceeded"). 새 페이지에서도 안 들어가는 첫 행은 강제로
 // 넣어 진행시키고, 이때는 셀 분할(overflow)을 건너뛴다.
