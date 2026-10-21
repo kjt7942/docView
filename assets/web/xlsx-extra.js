@@ -435,6 +435,13 @@
       var f = ctx.zip.file(rel.fullPath);
       if (f) files[rel.fullPath] = await f.async('uint8array');
     }
+    // 차트 본문(c:chartSpace). 그래프는 pptx-browser 의 차트 렌더러가 그린다.
+    for (var j = 0; j < names.length; j++) {
+      var cr = rels[names[j]];
+      if (cr.external || !/\/chart$/.test(cr.type || '')) continue;
+      var cf = ctx.zip.file(cr.fullPath);
+      if (cf) files[cr.fullPath] = await cf.async('uint8array');
+    }
     var imageCache = await P.loadImages(files, rels);
 
     var themeText = await readText(ctx.zip, ctx.themePath);
@@ -448,7 +455,7 @@
     for (var i = 0; i < anchor.children.length; i++) {
       var c = anchor.children[i];
       var n = c.localName;
-      if (n === 'sp' || n === 'pic' || n === 'grpSp' || n === 'cxnSp') {
+      if (n === 'sp' || n === 'pic' || n === 'grpSp' || n === 'cxnSp' || n === 'graphicFrame') {
         out.push(c);
       } else if (n === 'AlternateContent') {
         var choice = kid(c, 'Choice') || kid(c, 'Fallback');
@@ -459,7 +466,7 @@
   }
 
   function objectXfrm(obj) {
-    var holder = obj.localName === 'grpSp' ? kid(obj, 'grpSpPr') : kid(obj, 'spPr');
+    var holder = obj.localName === 'grpSp' ? kid(obj, 'grpSpPr') : obj.localName === 'graphicFrame' ? obj : kid(obj, 'spPr');
     var x = holder ? kid(holder, 'xfrm') : null;
     if (!x) return null;
     var off = kid(x, 'off');
@@ -501,14 +508,14 @@
       var next = m ? [m].concat(maps) : maps;
       for (var i = 0; i < node.children.length; i++) {
         var c = node.children[i];
-        if (c.localName === 'sp' || c.localName === 'pic' || c.localName === 'cxnSp' || c.localName === 'grpSp') {
+        if (c.localName === 'sp' || c.localName === 'pic' || c.localName === 'cxnSp' || c.localName === 'grpSp' || c.localName === 'graphicFrame') {
           flatten(c, next, out);
         }
       }
       return;
     }
     var copy = node.cloneNode(true);
-    var x = kid(kid(copy, 'spPr'), 'xfrm');
+    var x = copy.localName === 'graphicFrame' ? kid(copy, 'xfrm') : kid(kid(copy, 'spPr'), 'xfrm');
     var off = x && kid(x, 'off');
     var ext = x && kid(x, 'ext');
     if (off && ext && maps.length) {

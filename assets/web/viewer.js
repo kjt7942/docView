@@ -22,6 +22,24 @@
     }
   }
 
+  // 문서 안의 웹 주소/메일/전화 링크는 앱이 대신 열어 준다(WebView 안에서는 이동하지 않는다).
+  function openExternal(url) {
+    if (/^(https?:|mailto:|tel:)/i.test(url)) post({ type: 'openLink', url: url });
+  }
+  document.addEventListener(
+    'click',
+    function (ev) {
+      var a = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+      if (!a) return;
+      var href = a.getAttribute('href') || '';
+      if (/^(https?:|mailto:|tel:)/i.test(href)) {
+        ev.preventDefault();
+        openExternal(href);
+      }
+    },
+    true,
+  );
+
   function setStatus(text) {
     if (text) {
       statusEl.classList.remove('hidden');
@@ -203,8 +221,30 @@
 
   /* ---------------- XLSX / CSV ---------------- */
 
+  // CSV 등 텍스트 파일의 인코딩을 판별해 문자열로 바꾼다. SheetJS 에 바이트를 그대로 주면
+  // 한글이 깨지므로(UTF-8 을 1바이트 코드페이지로 읽음) 직접 UTF-8 → CP949 순으로 해석한다.
+  function decodeTextBytes(data) {
+    if (data.length >= 2 && data[0] === 0xff && data[1] === 0xfe) return new TextDecoder('utf-16le').decode(data);
+    if (data.length >= 2 && data[0] === 0xfe && data[1] === 0xff) return new TextDecoder('utf-16be').decode(data);
+    try {
+      return new TextDecoder('utf-8', { fatal: true }).decode(data);
+    } catch (e) {
+      try {
+        return new TextDecoder('euc-kr').decode(data);
+      } catch (e2) {
+        return new TextDecoder('windows-1252').decode(data);
+      }
+    }
+  }
+
   async function readWorkbook(buffer) {
     var data = new Uint8Array(buffer);
+    var isZip = data.length > 1 && data[0] === 0x50 && data[1] === 0x4b;
+    var isOle = data.length > 3 && data[0] === 0xd0 && data[1] === 0xcf && data[2] === 0x11 && data[3] === 0xe0;
+    if (!isZip && !isOle) {
+      // raw: 앞자리 0이 있는 전화번호 같은 값이 숫자로 바뀌지 않게 글자 그대로 둔다.
+      return XLSX.read(decodeTextBytes(data), { type: 'string', raw: true });
+    }
     var password;
     for (;;) {
       try {
@@ -398,6 +438,7 @@
           if (ex.info.hyperlinks[key]) {
             td.dataset.link = '1';
             td.dataset.loc = ex.info.hyperlinks[key].location || '';
+            td.dataset.url = ex.info.hyperlinks[key].url || '';
             td.classList.add('xl-link');
           }
         } else {
@@ -462,8 +503,14 @@
 
   async function renderXlsx(buffer) {
     var wb = await readWorkbook(buffer);
-    var names = wb.SheetNames || [];
-    if (!names.length) throw new Error('시트를 찾을 수 없습니다.');
+    var allNames = wb.SheetNames || [];
+    if (!allNames.length) throw new Error('시트를 찾을 수 없습니다.');
+    // 숨김 시트는 탭에 올리지 않는다(전부 숨김이면 그대로 둔다).
+    var metas = (wb.Workbook && wb.Workbook.Sheets) || [];
+    var names = allNames.filter(function (n, i) {
+      return !(metas[i] && metas[i].Hidden);
+    });
+    if (!names.length) names = allNames;
 
     // 서식·도형 보강 정보. 실패하면 SheetJS 만으로 그린다.
     var extra = null;
@@ -477,11 +524,13 @@
     tabs.className = 'sheet-tabs';
     var host = document.createElement('div');
     host.className = 'sheet-host';
-    root.classList.add('has-sheet-tabs');
+    // 시트가 하나뿐이면(CSV 등) 탭 줄이 필요 없다.
+    if (names.length > 1) root.classList.add('has-sheet-tabs');
 
-    var MAX_ROWS = 300;
+    var PAGE_ROWS = 300;
     var MAX_COLS = 80;
     var renderToken = 0;
+    var rowLimits = {}; // 시트별로 지금까지 펼친 행 수
 
     async function renderSheet(name) {
       var token = ++renderToken;
@@ -520,7 +569,8 @@
           /* 도형 범위를 모르면 셀 범위만 */
         }
       }
-      var endRow = Math.min(lastRow, (ex ? 0 : range.s.r) + MAX_ROWS - 1);
+      var limit = rowLimits[name] || PAGE_ROWS;
+      var endRow = Math.min(lastRow, (ex ? 0 : range.s.r) + limit - 1);
       var endCol = Math.min(lastCol, (ex ? 0 : range.s.c) + MAX_COLS - 1);
 
       var table = buildSheetTable(ws || {}, range, endRow, endCol, ex);
@@ -541,6 +591,10 @@
         table.addEventListener('click', function (ev) {
           var td = ev.target.closest ? ev.target.closest('td') : null;
           if (!td || !td.dataset.link) return;
+          if (td.dataset.url) {
+            openExternal(td.dataset.url);
+            return;
+          }
           var link = { location: td.dataset.loc || '' };
           var m = link && link.location ? /^'?(.*?)'?!/.exec(link.location) : null;
           if (m && names.indexOf(m[1]) >= 0) renderSheet(m[1]);
@@ -595,16 +649,22 @@
 
       var hiddenRows = lastRow - endRow;
       var hiddenCols = lastCol - endCol;
-      if (hiddenRows > 0 || hiddenCols > 0) {
-        host.appendChild(
-          note(
-            '미리보기 제한: ' +
-              (hiddenRows > 0 ? hiddenRows + '개 행' : '') +
-              (hiddenRows > 0 && hiddenCols > 0 ? ', ' : '') +
-              (hiddenCols > 0 ? hiddenCols + '개 열' : '') +
-              '은 표시하지 않았습니다.',
-          ),
-        );
+      if (hiddenRows > 0) {
+        var more = document.createElement('button');
+        more.type = 'button';
+        more.className = 'sheet-more';
+        more.textContent = '다음 행 더 보기 (' + hiddenRows.toLocaleString() + '개 남음)';
+        more.addEventListener('click', function () {
+          var top = host.scrollTop;
+          rowLimits[name] = limit + 500;
+          renderSheet(name).then(function () {
+            host.scrollTop = top;
+          });
+        });
+        host.appendChild(more);
+      }
+      if (hiddenCols > 0) {
+        host.appendChild(note('미리보기 제한: ' + hiddenCols + '개 열은 표시하지 않았습니다.'));
       }
     }
 
@@ -621,7 +681,7 @@
     });
 
     root.appendChild(host);
-    root.appendChild(tabs);
+    if (names.length > 1) root.appendChild(tabs);
     await renderSheet(names[0]);
     post({ type: 'ready', pages: names.length });
   }
@@ -872,6 +932,8 @@
   function inlineMd(s) {
     s = escapeHtml(s);
     return s
+      .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+      .replace(/\[([^\]]+)\]\(((?:https?:\/\/|mailto:)[^)\s"]+)\)/g, '<a href="$2">$1</a>')
       .replace(/`([^`]+)`/g, '<code>$1</code>')
       .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
       .replace(/(^|[^*])\*([^*]+)\*/g, '$1<em>$2</em>')

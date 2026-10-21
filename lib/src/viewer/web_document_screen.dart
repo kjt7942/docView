@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 
 import '../document.dart';
@@ -101,6 +102,8 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
     if (payload == null || !mounted) return;
 
     switch (payload['type']) {
+      case 'openLink':
+        _openLink(payload['url']);
       case 'ready':
         setState(() => _rendering = false);
       case 'error':
@@ -108,6 +111,22 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
           _rendering = false;
           _error = payload?['message'] as String? ?? '문서를 표시할 수 없습니다.';
         });
+    }
+  }
+
+  /// 문서 안의 링크는 http(s)/메일/전화만 외부 앱으로 연다.
+  Future<void> _openLink(Object? url) async {
+    final uri = url is String ? Uri.tryParse(url) : null;
+    if (uri == null || !const {'http', 'https', 'mailto', 'tel'}.contains(uri.scheme)) {
+      return;
+    }
+    try {
+      await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('링크를 열 수 없습니다.')),
+      );
     }
   }
 

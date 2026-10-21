@@ -10,7 +10,7 @@
 | PDF | `.pdf` | PDFium (pdfrx) | 매우 좋음 · 확대/스크롤/텍스트 선택 |
 | Word | `.docx` | docx-preview | 좋음 · 페이지 레이아웃/표/이미지 |
 | Word 97-2003 | `.doc` | @file-viewer/doc (MS-DOC 파서) | 좋음 · 서식/표/이미지, 화면 폭에 맞춤 |
-| Excel | `.xlsx`, `.xls`, `.csv` | SheetJS | 좋음 · 시트/값 · 200행·80열까지 미리보기 |
+| Excel | `.xlsx`, `.xls`, `.csv` | SheetJS + 자체 보강(`xlsx-extra.js`) | 좋음 · 셀 서식(글꼴/배경/테두리/정렬) · 도형·그림·차트 · 하단 시트 탭 · 300행씩 "더 보기" |
 | PowerPoint | `.pptx` | pptx-browser | 보통 · 도형/텍스트/이미지 · 복잡한 차트는 근사 |
 | PowerPoint 97-2003 | `.ppt` | 자체 추출기 (`ppt-text.js`) | **텍스트만** · 도형·이미지·서식은 표시하지 않음 |
 | 한글 | `.hwp` (5.0) | hwp.js (+ rhwp 보조) | 보통 · 본문/표 |
@@ -412,3 +412,9 @@ flutter run -d emulator-5554 --release --dart-define=GITHUB_REPO=kjt7942/docView
 ## 기획 단계 (미작성)
 
 자료조사용 최초 질문과 개발 착수 시 Claude에게 준 요청 프롬프트는 저장소에 남아 있지 않아 작성하지 못했습니다. 원문을 주시면 이 위치에 그대로 인용해 넣겠습니다.
+
+
+## Google Play 출시
+
+`docs/PLAY_STORE.md`(빌드·등록정보·데이터 보안 답변)와 `docs/PRIVACY.md`(개인정보 처리방침)를 참고하세요.
+스토어용 빌드는 Actions의 **Play bundle (AAB)** 워크플로를 수동 실행하면 만들어집니다.

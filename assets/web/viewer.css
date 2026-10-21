@@ -175,6 +175,17 @@ html, body {
 .sheet-host td.ctr { text-align: center; }
 .sheet-host td.wrap { white-space: pre-wrap; vertical-align: top; overflow-wrap: anywhere; }
 
+.sheet-more {
+  display: block;
+  margin: 12px auto;
+  padding: 10px 18px;
+  border: 1px solid var(--accent);
+  border-radius: 20px;
+  background: transparent;
+  color: var(--accent);
+  font-size: 14px;
+}
+
 .sheet-note,
 .render-note {
   margin: 10px 2px;
@@ -309,6 +320,7 @@ html, body {
   overflow-wrap: anywhere;
 }
 .md-doc h1, .md-doc h2 { border-bottom: 1px solid var(--border); padding-bottom: 4px; }
+.md-doc a { color: var(--accent); text-decoration: underline; }
 .md-doc code { background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 0.9em; }
 .md-doc pre { background: var(--bg); padding: 12px; border-radius: 8px; overflow-x: auto; }
 .md-doc pre code { background: none; padding: 0; }

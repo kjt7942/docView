@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:package_info_plus/package_info_plus.dart';
 
+import 'config.dart';
 import 'document.dart';
 import 'incoming_file.dart';
 import 'library_search.dart';
@@ -78,6 +80,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
         loaded.where((d) => !known.contains('${d.name}|${d.size}')),
       );
     });
+  }
+
+  Future<void> _showAbout() async {
+    String version = '';
+    try {
+      final info = await PackageInfo.fromPlatform();
+      version = info.version;
+    } catch (_) {
+      // 버전을 못 읽어도 정보 창은 보여 준다.
+    }
+    if (!mounted) return;
+    showAboutDialog(
+      context: context,
+      applicationName: '문서 뷰어',
+      applicationVersion: version,
+      applicationIcon: const Icon(Icons.description_outlined, size: 40),
+      children: const [
+        SizedBox(height: 8),
+        Text(
+          '광고 없이 PDF·Word·Excel·PowerPoint·한글 문서를 여는 뷰어입니다.\n'
+          '문서는 기기 밖으로 전송되지 않으며, 모든 처리는 기기 안에서 이뤄집니다.',
+        ),
+      ],
+    );
   }
 
   void _showError(String? message) {
@@ -316,10 +342,23 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     icon: const Icon(Icons.search),
                     tooltip: '검색',
                   ),
-                IconButton(
-                  onPressed: () => checkForUpdates(context, manual: true),
-                  icon: const Icon(Icons.system_update_alt),
-                  tooltip: '업데이트 확인',
+                PopupMenuButton<String>(
+                  tooltip: '더 보기',
+                  onSelected: (value) {
+                    if (value == 'update') checkForUpdates(context, manual: true);
+                    if (value == 'about') _showAbout();
+                  },
+                  itemBuilder: (context) => [
+                    if (AppConfig.hasReleaseChannel)
+                      const PopupMenuItem(
+                        value: 'update',
+                        child: Text('업데이트 확인'),
+                      ),
+                    const PopupMenuItem(
+                      value: 'about',
+                      child: Text('앱 정보 · 오픈소스 라이선스'),
+                    ),
+                  ],
                 ),
                 if (_recent.isNotEmpty)
                   IconButton(

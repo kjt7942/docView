@@ -1,13 +1,15 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <!-- 업데이트 확인 및 APK 다운로드 -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- 앱 내 자동 업데이트 설치 -->
-    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- 앱 내 자동 업데이트 설치(GitHub 배포판 전용).
+         Play 스토어 빌드(STORE_BUILD=true)는 이 권한이 정책상 금지라 build.gradle.kts에서 무해한 값으로 바꾼다. -->
+    <uses-permission android:name="${installPackagesPermission}" />
 
     <application
         android:label="문서 뷰어"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
+        android:allowBackup="false"
         android:networkSecurityConfig="@xml/network_security_config">
         <activity
             android:name=".MainActivity"
@@ -259,6 +261,19 @@
 
          In particular, this is used by the Flutter engine in io.flutter.plugin.text.ProcessTextPlugin. -->
     <queries>
+        <!-- 문서 안의 링크를 브라우저/메일/전화 앱으로 넘기기 위해 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="mailto"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="tel"/>
+        </intent>
         <intent>
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>

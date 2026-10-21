@@ -39,6 +39,12 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // Play 스토어용 빌드(STORE_BUILD=true)에서는 '알 수 없는 앱 설치' 권한을 쓰지 않는다.
+        // 자체 업데이트(GitHub APK)는 Play 정책 위반이므로 스토어 빌드엔 업데이트 기능도 들어가지 않는다.
+        val storeBuild = System.getenv("STORE_BUILD") == "true"
+        manifestPlaceholders["installPackagesPermission"] =
+            if (storeBuild) "android.permission.INTERNET" else "android.permission.REQUEST_INSTALL_PACKAGES"
     }
 
     signingConfigs {
