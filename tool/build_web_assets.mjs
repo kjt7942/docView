@@ -56,6 +56,50 @@ render = render.replace(
 );
 fs.writeFileSync(renderPath, render);
 
+// g1()은 자손 전체를 탐색한다. 도형의 채우기를 찾을 때 noFill을 먼저 찾으면
+// <a:ln><a:noFill/></a:ln>(윤곽선 없음)을 도형 채우기로 오인해, "윤곽선 없음 + 단색 채우기"
+// 도형(레이아웃 배경 사각형 등)과 표 셀 배경이 그려지지 않는다. 직계 자식에서만 찾도록 고친다.
+console.log('[2/4] pptx-browser 채우기 탐색 패치');
+const fillLoop = [
+  '    for (const fn of fillNames) {',
+  '      const el = g1(spPr, fn);',
+  '      if (el) return el;',
+  '    }',
+].join('\n');
+const cellFill =
+  "const fillEl = tcPr ? (['noFill','solidFill','gradFill','blipFill','pattFill'].map(n=>g1(tcPr,n)).find(Boolean)) : null;";
+if (!render.includes(fillLoop) || !render.includes(cellFill)) {
+  throw new Error('pptx-browser 채우기 패치 지점을 찾지 못했습니다(버전 변경 확인).');
+}
+render = render
+  .replace(
+    fillLoop,
+    [
+      '    for (const child of spPr ? spPr.children : []) {',
+      '      if (fillNames.includes(child.localName)) return child;',
+      '    }',
+    ].join('\n'),
+  )
+  .replace(
+    cellFill,
+    "const fillEl = tcPr ? ([...tcPr.children].find((c) => ['noFill','solidFill','gradFill','blipFill','pattFill'].includes(c.localName)) ?? null) : null;",
+  );
+fs.writeFileSync(renderPath, render);
+
+// getRunColorInherited()는 이미 CSS 문자열("rgb(r,g,b)")을 돌려주는데, 그리는 쪽이 그 문자열을
+// colorToCss()에 한 번 더 넣어 "rgb(undefined,...)"가 된다. 캔버스가 이 값을 무시해서
+// 색이 지정된 글자가 직전에 쓰던 색(흰색 등)으로 그려진다. 문자열이면 그대로 쓴다.
+console.log('[2/4] pptx-browser 글자색 이중 변환 패치');
+const runColor = "        ctx.fillStyle = c ? colorToCss(c) : '#000000';";
+if (!render.includes(runColor)) {
+  throw new Error('pptx-browser 글자색 패치 지점을 찾지 못했습니다(버전 변경 확인).');
+}
+render = render.replace(
+  runColor,
+  "        ctx.fillStyle = c ? (typeof c === 'string' ? c : colorToCss(c)) : '#000000';",
+);
+fs.writeFileSync(renderPath, render);
+
 // hwp.js 0.0.3 splitTable은 첫 행이 한 페이지보다 높으면 같은 표로 무한 재귀한다
 // ("Maximum call stack size exceeded"). 새 페이지에서도 안 들어가는 첫 행은 강제로
 // 넣어 진행시키고, 이때는 셀 분할(overflow)을 건너뛴다.

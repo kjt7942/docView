@@ -265,7 +265,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
   }
 
   /// [direction]이 1이면 다음, -1이면 이전 화면. 한 번에 [ReaderSettings.pageRatio]만큼 넘어간다.
-  void _page(int direction) {
+  void _page(int direction, {Duration duration = const Duration(milliseconds: 220)}) {
     if (!_scroll.hasClients) return;
     final pos = _scroll.position;
     final target =
@@ -275,33 +275,38 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
         );
     _scroll.animateTo(
       target,
-      duration: const Duration(milliseconds: 220),
+      duration: duration,
       curve: Curves.easeOutCubic,
     );
   }
 
-  /// 길게 누르는 동안 스크롤하듯 계속 넘긴다. 처음에는 천천히, 0.7초에 걸쳐 설정 속도까지 빨라진다.
+  /// 길게 누르는 동안 탭을 연달아 누르듯 한 화면씩 계속 넘긴다.
+  ///
+  /// 길게 누르기가 인식되는 순간 한 화면을 먼저 넘기고(그 전에는 탭이 발생하지 않는다),
+  /// 이후 [ReaderSettings.holdSpeed]에 따라 초당 N화면씩 반복한다. 스크롤처럼 부드럽게
+  /// 미끄러지지 않고, 매번 한 쪽 단위로 끊어 넘어간다. 끝에 닿으면 멈춘다.
   void _startHold(int direction) {
     _stopHold();
     if (!_scroll.hasClients) return;
-    final watch = Stopwatch()..start();
-    var last = 0;
     HapticFeedback.selectionClick();
-    _holdTimer = Timer.periodic(const Duration(milliseconds: 16), (_) {
-      if (!_scroll.hasClients) return _stopHold();
-      final now = watch.elapsedMilliseconds;
-      final dt = (now - last) / 1000;
-      last = now;
-      final ramp = math.min(1.0, 0.35 + now / 700);
-      final pos = _scroll.position;
-      final next =
-          (pos.pixels +
-                  direction * pos.viewportDimension * _s.holdSpeed * ramp * dt)
-              .clamp(pos.minScrollExtent, pos.maxScrollExtent);
-      if (next == pos.pixels) return _stopHold();
-      _scroll.jumpTo(next);
-    });
     if (_showBars) setState(() => _showBars = false);
+
+    final intervalMs = math.max(150, math.min(3000, (1000 / _s.holdSpeed).round()));
+    // 다음 쪽 넘김이 시작되기 전에 이동 애니메이션이 끝나야 위치가 어긋나지 않는다.
+    final duration = Duration(milliseconds: math.min(220, (intervalMs * 0.75).round()));
+
+    void step() {
+      if (!_scroll.hasClients) return _stopHold();
+      final pos = _scroll.position;
+      final atEdge = direction > 0
+          ? pos.pixels >= pos.maxScrollExtent - 0.5
+          : pos.pixels <= pos.minScrollExtent + 0.5;
+      if (atEdge) return _stopHold();
+      _page(direction, duration: duration);
+    }
+
+    step();
+    _holdTimer = Timer.periodic(Duration(milliseconds: intervalMs), (_) => step());
   }
 
   void _stopHold() {

@@ -81,7 +81,9 @@ html, body {
   margin: 0 auto 14px !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18) !important;
   border-radius: 4px;
-  background: var(--paper) !important;
+  /* 용지는 테마와 무관하게 항상 흰색·검정 글씨. (다크 모드에서 어두운 용지에 문서의 검은 글씨가 묻히던 문제) */
+  background: #fff !important;
+  color: #000;
 }
 
 /* ---------- XLSX ---------- */

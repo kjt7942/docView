@@ -237,6 +237,21 @@
     return null;
   }
 
+  // 셀 배경색(RGB)을 CSS로. 배경이 있으면 글자색은 대비가 되도록 흑/백으로 고른다
+  // (문서의 글꼴 색은 읽을 수 없고, 다크 모드의 밝은 글씨가 밝은 배경 위에 놓이는 것을 막는다).
+  function cellFillColor(cell) {
+    var st = cell.s;
+    if (!st || st.patternType !== 'solid' || !st.fgColor || !st.fgColor.rgb) return null;
+    var hex = String(st.fgColor.rgb);
+    if (hex.length === 8) hex = hex.slice(2);
+    if (!/^[0-9a-fA-F]{6}$/.test(hex)) return null;
+    var r = parseInt(hex.slice(0, 2), 16);
+    var g = parseInt(hex.slice(2, 4), 16);
+    var b = parseInt(hex.slice(4, 6), 16);
+    var luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    return { css: '#' + hex, dark: luma < 140 };
+  }
+
   function buildSheetTable(ws, range, endRow, endCol) {
     var r0 = range.s.r;
     var c0 = range.s.c;
@@ -328,6 +343,12 @@
         td.textContent = text;
         if (cell && cell.t === 'n') td.className = 'num';
         else if (cell && (cell.t === 'b' || cell.t === 'e')) td.className = 'ctr';
+
+        var fill = cell ? cellFillColor(cell) : null;
+        if (fill) {
+          td.style.backgroundColor = fill.css;
+          td.style.color = fill.dark ? '#fff' : '#000';
+        }
 
         var merge = anchors[key];
         if (merge) {

@@ -63,7 +63,7 @@ class ReaderSettings {
     this.joinLines = false,
     this.tapPaging = true,
     this.pageRatio = 0.9,
-    this.holdSpeed = 1.5,
+    this.holdSpeed = 3.0,
     this.keepScreenOn = true,
   });
 
@@ -93,7 +93,7 @@ class ReaderSettings {
   /// 한 번 넘길 때 화면 높이의 몇 배만큼 이동할지.
   final double pageRatio;
 
-  /// 길게 누르고 있을 때 1초에 넘어가는 화면 수.
+  /// 길게 누르고 있을 때 1초에 넘기는 화면(쪽) 수. 한 쪽씩 끊어서 넘어간다.
   final double holdSpeed;
 
   /// 읽는 동안 화면이 꺼지지 않게 한다.

@@ -3798,7 +3798,7 @@ var PptxBrowser = (() => {
         };
         for (const run of runs) {
           const c = run.color;
-          ctx.fillStyle = c ? colorToCss(c) : "#000000";
+          ctx.fillStyle = c ? typeof c === "string" ? c : colorToCss(c) : "#000000";
           let drawY = baseline;
           let fi = run.fontInfo;
           if (run.baseline !== 0) {
@@ -3941,9 +3941,8 @@ var PptxBrowser = (() => {
     }
     const getFill = () => {
       const fillNames = ["noFill", "solidFill", "gradFill", "blipFill", "pattFill", "grpFill"];
-      for (const fn of fillNames) {
-        const el = g1(spPr, fn);
-        if (el) return el;
+      for (const child of spPr ? spPr.children : []) {
+        if (fillNames.includes(child.localName)) return child;
       }
       const styleEl = g1(spEl, "style");
       if (styleEl) {
@@ -4302,7 +4301,7 @@ var PptxBrowser = (() => {
           cellW += colWidths[ci + gs] || 0;
         }
         const tcPr = g1(cell, "tcPr");
-        const fillEl = tcPr ? ["noFill", "solidFill", "gradFill", "blipFill", "pattFill"].map((n) => g1(tcPr, n)).find(Boolean) : null;
+        const fillEl = tcPr ? [...tcPr.children].find((c) => ["noFill", "solidFill", "gradFill", "blipFill", "pattFill"].includes(c.localName)) ?? null : null;
         ctx.save();
         ctx.beginPath();
         ctx.rect(curX, curY, cellW, rowH);
