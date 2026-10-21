@@ -956,7 +956,12 @@
 
   /* ---------------- DOC (구형 Word 97-2003) ---------------- */
 
-  function renderDoc(buffer) {
+  // .doc 은 쪽 정보를 따로 주지 않으므로 A4(여백 1인치)로 가정하고, 렌더된 본문을 쪽 단위로 나눠 담는다.
+  var DOC_PAGE_W = 794;
+  var DOC_PAGE_H = 1123;
+  var DOC_MARGIN = 96;
+
+  async function renderDoc(buffer) {
     if (typeof MsDoc === 'undefined') throw new Error('DOC 렌더러를 찾을 수 없습니다.');
     var out;
     try {
@@ -967,24 +972,110 @@
       }
       throw e;
     }
-    var paper = document.createElement('article');
-    paper.className = 'doc-paper';
-    paper.innerHTML = '<style>' + out.css + '</style><div class="msdoc-root">' + out.html + '</div>';
-    root.appendChild(paper);
 
-    // 표·이미지가 화면보다 넓으면 본문 전체를 폭에 맞춰 줄인다(이미지는 늦게 로드되므로 load에도 다시 잰다).
-    var body = paper.querySelector('.msdoc-root');
-    function fit() {
-      body.style.zoom = '';
-      var avail = paper.clientWidth - 32; // .doc-paper 좌우 패딩
-      if (body.scrollWidth > avail) body.style.zoom = String(avail / body.scrollWidth);
-    }
-    fit();
-    paper.querySelectorAll('img').forEach(function (img) {
-      img.addEventListener('load', fit);
-    });
-    window.addEventListener('resize', fit);
+    var styleEl = document.createElement('style');
+    styleEl.textContent = out.css;
+    root.appendChild(styleEl);
+
+    // 먼저 한 덩어리로 만들어 이미지 크기가 정해질 때까지 기다린 뒤 쪽으로 나눈다.
+    var holder = document.createElement('div');
+    holder.className = 'msdoc-root doc-measure';
+    holder.innerHTML = out.html;
+    var stage = document.createElement('section');
+    stage.className = 'doc-page doc-stage';
+    stage.appendChild(holder);
+    var pages = document.createElement('div');
+    pages.className = 'doc-pages';
+    pages.appendChild(stage);
+    root.appendChild(pages);
+
+    var imgs = Array.prototype.slice.call(holder.querySelectorAll('img'));
+    await Promise.all(
+      imgs.map(function (img) {
+        if (img.complete) return null;
+        return new Promise(function (resolve) {
+          img.addEventListener('load', resolve);
+          img.addEventListener('error', resolve);
+          setTimeout(resolve, 4000);
+        });
+      }),
+    );
+
+    paginateDoc(pages, holder);
+    stage.remove();
+    fitToWidth('.doc-pages > .doc-page');
     post({ type: 'ready' });
+  }
+
+  function paginateDoc(pages, holder) {
+    var limit = DOC_PAGE_H - DOC_MARGIN * 2;
+    var nodes = Array.prototype.slice.call(holder.children);
+    var body = null;
+
+    function newPage() {
+      var page = document.createElement('section');
+      page.className = 'doc-page';
+      body = document.createElement('div');
+      body.className = 'msdoc-root doc-page-body';
+      page.appendChild(body);
+      pages.appendChild(page);
+      return body;
+    }
+    function overflows() {
+      return body.scrollHeight > limit + 1;
+    }
+    // 표가 한 쪽보다 길면 행 단위로 잘라 다음 쪽으로 넘긴다.
+    function splitTable(table) {
+      while (overflows() && table.rows.length > 1) {
+        var moved = [];
+        while (overflows() && table.rows.length > 1) {
+          moved.unshift(table.rows[table.rows.length - 1]);
+          table.rows[table.rows.length - 1].remove();
+        }
+        if (!moved.length) break;
+        var rest = table.cloneNode(false);
+        var cg = table.querySelector('colgroup');
+        if (cg) rest.appendChild(cg.cloneNode(true));
+        var tb = document.createElement('tbody');
+        moved.forEach(function (row) {
+          tb.appendChild(row);
+        });
+        rest.appendChild(tb);
+        newPage();
+        body.appendChild(rest);
+        table = rest;
+      }
+    }
+
+    newPage();
+    var forceBreak = false;
+    nodes.forEach(function (node) {
+      var breakBefore = node.style && node.style.breakBefore === 'page';
+      if ((forceBreak || breakBefore) && body.childNodes.length) newPage();
+      forceBreak = false;
+
+      body.appendChild(node);
+      if (overflows() && body.childNodes.length > 1) {
+        body.removeChild(node);
+        // 제목처럼 "다음 문단과 붙여 두기"로 표시된 앞 문단은 함께 넘긴다.
+        var carry = null;
+        var prev = body.lastElementChild;
+        if (prev && prev.style && prev.style.breakAfter === 'avoid' && body.childNodes.length > 1) carry = prev;
+        if (carry) body.removeChild(carry);
+        newPage();
+        if (carry) body.appendChild(carry);
+        body.appendChild(node);
+      }
+      if (overflows() && node.tagName === 'TABLE') splitTable(node);
+
+      if (node.querySelector && node.querySelector('.msdoc-page-break')) forceBreak = true;
+    });
+
+    // 끝에 빈 쪽이 남았으면 지운다.
+    var last = pages.lastElementChild;
+    if (last && last.classList.contains('doc-page') && !last.textContent.trim() && !last.querySelector('img, table')) {
+      if (pages.children.length > 1) last.remove();
+    }
   }
 
   /* ---------------- PPT (구형 PowerPoint 97-2003: 텍스트만) ---------------- */
@@ -1196,7 +1287,7 @@
       } else if (kind === 'hwpx') {
         await renderRhwp(buffer);
       } else if (kind === 'doc') {
-        renderDoc(buffer);
+        await renderDoc(buffer);
       } else if (kind === 'ppt') {
         renderPpt(buffer);
       } else if (kind === 'markdown') {
@@ -1209,6 +1300,7 @@
       setStatus(null);
       var pageSelector = {
         docx: '.docx-wrapper > section.docx',
+        doc: '.doc-pages > .doc-page',
         ppt: '.ppt-card',
         hwp: '.rhwp-page, .hwp-host div[data-page-number]:not(.hwpjs-observer)',
         hwpx: '.rhwp-page',

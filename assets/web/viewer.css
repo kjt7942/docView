@@ -232,18 +232,25 @@ html, body {
 
 .rhwp-page svg { display: block; width: 100%; height: auto; }
 
-.doc-paper {
-  padding: 16px;
+/* .doc 은 A4 용지(여백 1인치) 한 장씩 나눠서 보여 준다. */
+.doc-pages { display: block; }
+
+.doc-page {
+  width: 794px;
+  min-height: 1123px;
+  padding: 96px;
+  margin: 0 auto 14px;
   background: #fff;
   color: #000;
-  border-radius: 6px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
-  overflow-x: auto;
+  border-radius: 4px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18);
 }
 
-.doc-paper img { max-width: 100%; height: auto; }
+.doc-page .msdoc-root { width: 602px; max-width: none; padding: 0; background: #fff; }
+.doc-page img { max-width: 100%; height: auto; }
+.doc-page .msdoc-page-break { display: none; }
 /* 문서가 지정한 글꼴이 기기에 없으면 고정폭으로 떨어지므로 읽기 좋은 기본 글꼴로 통일한다. */
-.doc-paper .msdoc-root, .doc-paper .msdoc-root * {
+.doc-page .msdoc-root, .doc-page .msdoc-root * {
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Malgun Gothic", "Apple SD Gothic Neo", "Noto Sans KR", sans-serif !important;
 }
 
