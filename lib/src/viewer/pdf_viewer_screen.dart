@@ -3,6 +3,7 @@ import 'package:pdfrx/pdfrx.dart';
 
 import '../document.dart';
 import 'password_dialog.dart';
+import 'reading_chrome.dart';
 
 /// PDF 렌더러. PDFium 기반이라 Android/iOS에서 동일한 결과가 나온다.
 class PdfViewerScreen extends StatefulWidget {
@@ -91,24 +92,10 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.document.name, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (_pageCount > 0)
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.only(right: 16),
-                child: Text(
-                  '$_pageNumber / $_pageCount',
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
+    return ReadingChrome(
+      title: widget.document.name,
+      page: _pageCount > 0 ? _pageNumber : null,
+      pageCount: _pageCount > 0 ? _pageCount : null,
       body: PdfViewer.file(
         widget.document.path,
         key: ValueKey(_reloadCount),

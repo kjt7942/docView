@@ -8,6 +8,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 
 import '../document.dart';
 import 'document_web_server.dart';
+import 'reading_chrome.dart';
 
 /// DOCX/XLSX/PPTX/HWP를 WebView 안의 오프라인 JS 렌더러로 표시한다.
 class WebDocumentScreen extends StatefulWidget {
@@ -24,6 +25,8 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
   WebViewController? _controller;
   String? _error;
   bool _rendering = true;
+  int? _page;
+  int? _pageTotal;
 
   @override
   void initState() {
@@ -102,6 +105,15 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
     if (payload == null || !mounted) return;
 
     switch (payload['type']) {
+      case 'page':
+        final page = payload['page'];
+        final total = payload['total'];
+        if (page is int && total is int) {
+          setState(() {
+            _page = page;
+            _pageTotal = total;
+          });
+        }
       case 'openLink':
         _openLink(payload['url']);
       case 'ready':
@@ -151,18 +163,19 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(widget.document.name, overflow: TextOverflow.ellipsis),
-        actions: [
-          if (_error != null)
-            IconButton(
-              onPressed: _retry,
-              icon: const Icon(Icons.refresh),
-              tooltip: '다시 열기',
-            ),
-        ],
-      ),
+    return ReadingChrome(
+      title: widget.document.name,
+      pinned: _error != null,
+      page: _page,
+      pageCount: _pageTotal,
+      actions: [
+        if (_error != null)
+          IconButton(
+            onPressed: _retry,
+            icon: const Icon(Icons.refresh),
+            tooltip: '다시 열기',
+          ),
+      ],
       body: _buildBody(theme),
     );
   }

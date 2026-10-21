@@ -40,6 +40,47 @@
     true,
   );
 
+  // 쪽 단위 문서에서 지금 보고 있는 쪽을 앱에 알린다(앱이 "7 / 8"을 그린다).
+  function trackPages(selector) {
+    var last = 0;
+    var lastTotal = 0;
+    var ticking = false;
+    function update() {
+      ticking = false;
+      var els = document.querySelectorAll(selector);
+      var total = els.length;
+      if (total < 1) return;
+      var probe = window.innerHeight * 0.35;
+      var cur = 1;
+      for (var i = 0; i < total; i++) {
+        if (els[i].getBoundingClientRect().top <= probe) cur = i + 1;
+        else break;
+      }
+      var atEnd = window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 4;
+      if (atEnd && total > 1) cur = total;
+      if (cur !== last || total !== lastTotal) {
+        last = cur;
+        lastTotal = total;
+        post({ type: 'page', page: cur, total: total });
+      }
+    }
+    window.addEventListener(
+      'scroll',
+      function () {
+        if (!ticking) {
+          ticking = true;
+          requestAnimationFrame(update);
+        }
+      },
+      { passive: true },
+    );
+    window.addEventListener('resize', update);
+    update();
+    // 쪽이 나중에 만들어지는 렌더러(hwp.js 등)를 위해 몇 번 더 확인한다.
+    setTimeout(update, 700);
+    setTimeout(update, 2500);
+  }
+
   function setStatus(text) {
     if (text) {
       statusEl.classList.remove('hidden');
@@ -696,20 +737,76 @@
     if (!total) throw new Error('슬라이드를 찾을 수 없습니다.');
 
     var width = Math.min(Math.max(root.clientWidth - 8, 320), 1100);
+    // 화면 픽셀 밀도만큼 크게 그려야 선명하다(예전에는 CSS 픽셀 크기로만 그려 흐렸다).
+    // 슬라이드가 많아도 메모리가 터지지 않게, 화면 근처의 슬라이드만 그리고 멀어지면 비운다.
+    var dpr = Math.min(window.devicePixelRatio || 1, 3);
+    var pxWidth = Math.min(Math.round(width * dpr), 2400);
+    var size = renderer.slideSize || { cx: 16, cy: 9 };
+    var ratio = size.cx / size.cy;
+
+    var slides = [];
     for (var i = 0; i < total; i++) {
-      setStatus('슬라이드 ' + (i + 1) + ' / ' + total + ' 렌더링 중…');
       var wrap = document.createElement('div');
       wrap.className = 'slide';
       var canvas = document.createElement('canvas');
+      canvas.style.aspectRatio = String(ratio);
       var label = document.createElement('div');
       label.className = 'slide-index';
       label.textContent = i + 1 + ' / ' + total;
       wrap.appendChild(canvas);
       wrap.appendChild(label);
       root.appendChild(wrap);
-      await renderer.renderSlide(i, canvas, width);
+      slides.push({ index: i, wrap: wrap, canvas: canvas, state: 'idle' });
     }
 
+    var chain = Promise.resolve();
+    function draw(slide) {
+      if (slide.state !== 'idle') return chain;
+      slide.state = 'queued';
+      chain = chain.then(async function () {
+        if (slide.state !== 'queued') return; // 그리기 전에 화면에서 멀어졌다.
+        slide.state = 'drawing';
+        try {
+          await renderer.renderSlide(slide.index, slide.canvas, pxWidth);
+          slide.state = 'done';
+        } catch (e) {
+          slide.state = 'idle';
+        }
+      });
+      return chain;
+    }
+    function release(slide) {
+      if (slide.state === 'done') {
+        slide.canvas.width = 1;
+        slide.canvas.height = 1;
+        slide.state = 'idle';
+      } else if (slide.state === 'queued') {
+        slide.state = 'idle';
+      }
+    }
+
+    // 첫 슬라이드는 그려 놓고 "열림"으로 알린다.
+    await draw(slides[0]);
+    if ('IntersectionObserver' in window) {
+      var near = new IntersectionObserver(
+        function (entries) {
+          entries.forEach(function (entry) {
+            var slide = slides[Array.prototype.indexOf.call(root.children, entry.target)];
+            if (!slide) return;
+            if (entry.isIntersecting) draw(slide);
+            else release(slide);
+          });
+        },
+        { rootMargin: '1400px 0px' },
+      );
+      slides.forEach(function (slide) {
+        near.observe(slide.wrap);
+      });
+    } else {
+      for (var k = 1; k < slides.length; k++) await draw(slides[k]);
+    }
+
+    trackPages('.slide');
     post({ type: 'ready', pages: total });
   }
 
@@ -1110,6 +1207,13 @@
         throw new Error('지원하지 않는 형식입니다.');
       }
       setStatus(null);
+      var pageSelector = {
+        docx: '.docx-wrapper > section.docx',
+        ppt: '.ppt-card',
+        hwp: '.rhwp-page, .hwp-host div[data-page-number]:not(.hwpjs-observer)',
+        hwpx: '.rhwp-page',
+      }[kind];
+      if (pageSelector) trackPages(pageSelector);
     } catch (error) {
       root.hidden = true;
       showError(friendlyMessage(error));
