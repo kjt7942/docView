@@ -177,8 +177,28 @@
       experimental: true,
       useBase64URL: true,
     });
+    removeBlankDocxPages();
     fitToWidth('.docx-wrapper > section.docx');
     post({ type: 'ready' });
+  }
+
+  /*
+   * 제목 스타일의 '단락 앞 쪽 나눔'과 Word가 저장해 둔 '마지막 렌더링된 페이지 나눔'이 같은 지점에
+   * 겹치면 렌더러가 두 번 끊어 내용 없는 페이지가 끼어든다(8쪽 문서가 14쪽으로 보임).
+   * 본문(article)에 글자도, 그림·표도 없는 페이지는 지운다. 머리글/바닥글만 있는 쪽도 빈 쪽이다.
+   */
+  function removeBlankDocxPages() {
+    var pages = Array.prototype.slice.call(root.querySelectorAll('.docx-wrapper > section.docx'));
+    var blank = pages.filter(function (page) {
+      var body = page.querySelector('article') || page;
+      var hasText = body.textContent.replace(/\s+/g, '') !== '';
+      var hasMedia = !!body.querySelector('img, svg, canvas, table, video, object, embed');
+      return !hasText && !hasMedia;
+    });
+    if (blank.length === pages.length) return; // 전부 빈 문서면 그대로 둔다.
+    blank.forEach(function (page) {
+      page.remove();
+    });
   }
 
   /* ---------------- XLSX / CSV ---------------- */
