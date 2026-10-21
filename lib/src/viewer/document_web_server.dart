@@ -27,6 +27,7 @@ class DocumentWebServer {
     '/viewer.js': 'text/javascript; charset=utf-8',
     '/office-crypto.js': 'text/javascript; charset=utf-8',
     '/ppt-text.js': 'text/javascript; charset=utf-8',
+    '/xlsx-extra.js': 'text/javascript; charset=utf-8',
     '/vendor/msdoc.min.js': 'text/javascript; charset=utf-8',
     '/vendor/rhwp.min.js': 'text/javascript; charset=utf-8',
     '/vendor/rhwp_bg.wasm': 'application/wasm',

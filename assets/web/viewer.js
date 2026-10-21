@@ -272,9 +272,11 @@
     return { css: '#' + hex, dark: luma < 140 };
   }
 
-  function buildSheetTable(ws, range, endRow, endCol) {
-    var r0 = range.s.r;
-    var c0 = range.s.c;
+  /* ex = { x: XlsxExtra 컨텍스트, info: 시트 서식 정보 } — 있으면 파일의 서식 그대로, 없으면 SheetJS 정보만으로 그린다. */
+  function buildSheetTable(ws, range, endRow, endCol, ex) {
+    var X = window.XlsxExtra;
+    var r0 = ex ? 0 : range.s.r;
+    var c0 = ex ? 0 : range.s.c;
     var colsInfo = ws['!cols'];
     var rowsInfo = ws['!rows'];
     var hasColInfo = !!(colsInfo && colsInfo.length);
@@ -289,16 +291,18 @@
       return cell.v == null ? '' : String(cell.v);
     }
     function rowHidden(r) {
+      if (ex) return X.rowHidden(ex.info, r);
       return !!(rowsInfo && rowsInfo[r] && rowsInfo[r].hidden);
     }
     function colHidden(c) {
+      if (ex) return X.colHidden(ex.info, c);
       return !!(colsInfo && colsInfo[c] && colsInfo[c].hidden);
     }
 
     // 열 너비: 파일에 있으면 그대로, 열 정보가 아예 없는 시트(CSV 등)는 내용으로 추정.
     var colWidth = [];
     for (var c = c0; c <= endCol; c++) {
-      var w = colInfoWidth(colsInfo && colsInfo[c]);
+      var w = ex ? X.colPx(ex.x, ex.info, c) : colInfoWidth(colsInfo && colsInfo[c]);
       if (w == null) {
         if (hasColInfo) {
           w = DEFAULT_COL_PX;
@@ -326,7 +330,7 @@
       var colspan = 0;
       for (var r = m.s.r; r <= er; r++) if (!rowHidden(r)) rowspan++;
       for (var c = m.s.c; c <= ec; c++) if (!colHidden(c)) colspan++;
-      anchors[m.s.r + ',' + m.s.c] = { rowspan: Math.max(rowspan, 1), colspan: Math.max(colspan, 1) };
+      anchors[m.s.r + ',' + m.s.c] = { rowspan: Math.max(rowspan, 1), colspan: Math.max(colspan, 1), er: er, ec: ec };
       for (var r2 = m.s.r; r2 <= er; r2++) {
         for (var c2 = m.s.c; c2 <= ec; c2++) {
           if (r2 !== m.s.r || c2 !== m.s.c) covered[r2 + ',' + c2] = true;
@@ -334,7 +338,24 @@
       }
     });
 
+    // 테두리: 이웃 셀이 같은 선을 그려 두었으면 그것을 따른다(collapse 모델에서 선이 사라지지 않게).
+    function xfOf(r, c) {
+      return X.xfIndex(ex.info, r, c);
+    }
+    function sideBorder(r, c, side) {
+      var own = X.borders(ex.x, xfOf(r, c))[side];
+      if (own) return own;
+      if (side === 'left' && c > 0) return X.borders(ex.x, xfOf(r, c - 1)).right || null;
+      if (side === 'right') return X.borders(ex.x, xfOf(r, c + 1)).left || null;
+      if (side === 'top' && r > 0) return X.borders(ex.x, xfOf(r - 1, c)).bottom || null;
+      if (side === 'bottom') return X.borders(ex.x, xfOf(r + 1, c)).top || null;
+      return null;
+    }
+    var gridLine = '1px solid #d9d9d9';
+    var styleCache = {};
+
     var table = document.createElement('table');
+    if (ex) table.className = 'xl';
     var colgroup = document.createElement('colgroup');
     var total = 0;
     for (var cc = c0; cc <= endCol; cc++) {
@@ -347,11 +368,13 @@
     table.appendChild(colgroup);
     table.style.width = total + 'px';
 
+    var rowEls = {};
     for (var r = r0; r <= endRow; r++) {
       if (rowHidden(r)) continue;
       var tr = document.createElement('tr');
-      var height = rowInfoHeight(rowsInfo && rowsInfo[r]);
+      var height = ex ? X.rowPx(ex.info, r) : rowInfoHeight(rowsInfo && rowsInfo[r]);
       if (height) tr.style.height = height + 'px';
+      rowEls[r] = tr;
 
       for (var c = c0; c <= endCol; c++) {
         var key = r + ',' + c;
@@ -361,20 +384,43 @@
         var text = textAt(r, c);
         var td = document.createElement('td');
         td.textContent = text;
-        if (cell && cell.t === 'n') td.className = 'num';
-        else if (cell && (cell.t === 'b' || cell.t === 'e')) td.className = 'ctr';
+        var merge = anchors[key];
+        var lastC = c;
+        var lastR = r;
+        var cs = null;
 
-        var fill = cell ? cellFillColor(cell) : null;
-        if (fill) {
-          td.style.backgroundColor = fill.css;
-          td.style.color = fill.dark ? '#fff' : '#000';
+        if (ex) {
+          var xi = xfOf(r, c);
+          cs = styleCache[xi] || (styleCache[xi] = X.cellStyle(ex.x, xi));
+          td.style.cssText = cs.css;
+          if (!cs.hAlign && cell && cell.t === 'n') td.style.textAlign = 'right';
+          else if (!cs.hAlign && cell && (cell.t === 'b' || cell.t === 'e')) td.style.textAlign = 'center';
+          if (ex.info.hyperlinks[key]) {
+            td.dataset.link = '1';
+            td.dataset.loc = ex.info.hyperlinks[key].location || '';
+            td.classList.add('xl-link');
+          }
+        } else {
+          if (cell && cell.t === 'n') td.className = 'num';
+          else if (cell && (cell.t === 'b' || cell.t === 'e')) td.className = 'ctr';
+          var fill = cell ? cellFillColor(cell) : null;
+          if (fill) {
+            td.style.backgroundColor = fill.css;
+            td.style.color = fill.dark ? '#fff' : '#000';
+          }
         }
 
-        var merge = anchors[key];
         if (merge) {
           if (merge.colspan > 1) td.colSpan = merge.colspan;
           if (merge.rowspan > 1) td.rowSpan = merge.rowspan;
-        } else if (text && !(cell && cell.t === 'n') && text.indexOf('\n') < 0) {
+          lastC = merge.ec;
+          lastR = merge.er;
+        } else if (
+          text &&
+          !(cell && cell.t === 'n') &&
+          text.indexOf('\n') < 0 &&
+          !(cs && (cs.wrap || (cs.hAlign && cs.hAlign !== 'left')))
+        ) {
           // 엑셀처럼 긴 글자는 오른쪽의 빈 셀 위로 넘쳐 보이게 한다.
           var need = estimateTextWidth(text);
           var have = colWidth[c];
@@ -386,14 +432,31 @@
             covered[k] = true;
             have += colWidth[n];
             span++;
+            lastC = n;
           }
           if (span > 1) td.colSpan = span;
         }
-        if (text.indexOf('\n') >= 0) td.classList.add('wrap');
+        if (!ex && text.indexOf('\n') >= 0) td.classList.add('wrap');
+
+        if (ex) {
+          var b = {
+            left: sideBorder(r, c, 'left'),
+            right: sideBorder(r, lastC, 'right'),
+            top: sideBorder(r, c, 'top'),
+            bottom: sideBorder(lastR, c, 'bottom'),
+          };
+          var none = ex.info.showGrid ? gridLine : 'none';
+          td.style.borderLeft = b.left || none;
+          td.style.borderRight = b.right || none;
+          td.style.borderTop = b.top || none;
+          td.style.borderBottom = b.bottom || none;
+        }
         tr.appendChild(td);
       }
       table.appendChild(tr);
     }
+    table._rowEls = rowEls;
+    table._colWidth = colWidth;
     return table;
   }
 
@@ -402,34 +465,136 @@
     var names = wb.SheetNames || [];
     if (!names.length) throw new Error('시트를 찾을 수 없습니다.');
 
+    // 서식·도형 보강 정보. 실패하면 SheetJS 만으로 그린다.
+    var extra = null;
+    try {
+      if (window.XlsxExtra) extra = await window.XlsxExtra.load(buffer);
+    } catch (e) {
+      extra = null;
+    }
+
     var tabs = document.createElement('div');
     tabs.className = 'sheet-tabs';
     var host = document.createElement('div');
     host.className = 'sheet-host';
+    root.classList.add('has-sheet-tabs');
 
-    var MAX_ROWS = 200;
+    var MAX_ROWS = 300;
     var MAX_COLS = 80;
+    var renderToken = 0;
 
-    function renderSheet(name) {
+    async function renderSheet(name) {
+      var token = ++renderToken;
       Array.prototype.forEach.call(tabs.children, function (button) {
-        button.classList.toggle('active', button.textContent === name);
+        var on = button.dataset.name === name;
+        button.classList.toggle('active', on);
+        if (on && button.scrollIntoView) button.scrollIntoView({ block: 'nearest', inline: 'nearest' });
       });
       host.innerHTML = '';
+      host.style.backgroundColor = '';
 
       var ws = wb.Sheets[name];
-      if (!ws || !ws['!ref']) {
+      var info = extra ? await window.XlsxExtra.sheetInfo(extra, name) : null;
+      if (token !== renderToken) return;
+      var ex = info ? { x: extra, info: info } : null;
+
+      var hasRef = !!(ws && ws['!ref']);
+      if (!hasRef && !(ex && (ex.info.drawingPath || ex.info.maxRow >= 0))) {
         host.appendChild(note('빈 시트입니다.'));
         return;
       }
 
-      var range = XLSX.utils.decode_range(ws['!ref']);
-      var endRow = Math.min(range.e.r, range.s.r + MAX_ROWS - 1);
-      var endCol = Math.min(range.e.c, range.s.c + MAX_COLS - 1);
+      var range = hasRef ? XLSX.utils.decode_range(ws['!ref']) : { s: { r: 0, c: 0 }, e: { r: 0, c: 0 } };
+      var lastRow = range.e.r;
+      var lastCol = range.e.c;
+      if (ex) {
+        // 빈 칸에 서식만 있는 영역과 도형이 놓인 영역까지 표를 넓힌다.
+        lastRow = Math.max(lastRow, ex.info.maxRow);
+        lastCol = Math.max(lastCol, ex.info.maxCol);
+        try {
+          var de = await window.XlsxExtra.drawingExtent(extra, ex.info);
+          if (token !== renderToken) return;
+          lastRow = Math.max(lastRow, de.row + 1);
+          lastCol = Math.max(lastCol, de.col + 1);
+        } catch (e) {
+          /* 도형 범위를 모르면 셀 범위만 */
+        }
+      }
+      var endRow = Math.min(lastRow, (ex ? 0 : range.s.r) + MAX_ROWS - 1);
+      var endCol = Math.min(lastCol, (ex ? 0 : range.s.c) + MAX_COLS - 1);
 
-      host.appendChild(buildSheetTable(ws, range, endRow, endCol));
+      var table = buildSheetTable(ws || {}, range, endRow, endCol, ex);
+      var surface = document.createElement('div');
+      surface.className = 'sheet-surface';
+      surface.appendChild(table);
+      host.appendChild(surface);
 
-      var hiddenRows = range.e.r - endRow;
-      var hiddenCols = range.e.c - endCol;
+      if (ex) {
+        // 열에 지정된 기본 배경(엑셀의 "전체 회색 바탕" 같은 서식)을 표 밖 여백에도 이어 칠한다.
+        var lastDef = ex.info.cols.length ? ex.info.cols[ex.info.cols.length - 1] : null;
+        if (lastDef && lastDef.style != null) {
+          var bg = window.XlsxExtra.cellStyle(extra, lastDef.style).fill;
+          if (bg) host.style.backgroundColor = bg;
+        }
+
+        // 클릭: 같은 문서 안의 시트로 가는 링크만 처리한다(외부 주소는 앱이 막는다).
+        table.addEventListener('click', function (ev) {
+          var td = ev.target.closest ? ev.target.closest('td') : null;
+          if (!td || !td.dataset.link) return;
+          var link = { location: td.dataset.loc || '' };
+          var m = link && link.location ? /^'?(.*?)'?!/.exec(link.location) : null;
+          if (m && names.indexOf(m[1]) >= 0) renderSheet(m[1]);
+        });
+
+        // 도형: 표 위에 캔버스를 얹는다. 행 높이는 실제 배치된 위치를 재서 맞춘다.
+        if (ex.info.drawingPath) {
+          try {
+            await new Promise(function (resolve) {
+              requestAnimationFrame(function () {
+                resolve();
+              });
+            });
+            if (token !== renderToken) return;
+            var colLeft = [0];
+            for (var c = 0; c <= endCol; c++) {
+              colLeft[c + 1] = colLeft[c] + (window.XlsxExtra.colHidden(ex.info, c) ? 0 : table._colWidth[c]);
+            }
+            var rowTop = {};
+            var lastKnown = 0;
+            var lastTop = 0;
+            Object.keys(table._rowEls).forEach(function (k) {
+              var i = parseInt(k, 10);
+              rowTop[i] = table._rowEls[k].offsetTop;
+              if (i >= lastKnown) {
+                lastKnown = i;
+                lastTop = rowTop[i] + table._rowEls[k].offsetHeight;
+              }
+            });
+            var geo = {
+              width: table.offsetWidth,
+              height: table.offsetHeight,
+              xOfCol: function (col) {
+                if (col <= endCol + 1) return colLeft[col];
+                return colLeft[endCol + 1] + (col - endCol - 1) * 64;
+              },
+              yOfRow: function (row) {
+                if (rowTop[row] != null) return rowTop[row];
+                if (row > lastKnown) return lastTop + (row - lastKnown - 1) * ex.info.defaultRowPx;
+                for (var q = row + 1; q <= lastKnown; q++) if (rowTop[q] != null) return rowTop[q];
+                return 0;
+              },
+            };
+            var canvas = await window.XlsxExtra.renderDrawings(extra, ex.info, geo);
+            if (token !== renderToken) return;
+            if (canvas) surface.appendChild(canvas);
+          } catch (e) {
+            if (window.console) console.warn('도형 표시 실패', e);
+          }
+        }
+      }
+
+      var hiddenRows = lastRow - endRow;
+      var hiddenCols = lastCol - endCol;
       if (hiddenRows > 0 || hiddenCols > 0) {
         host.appendChild(
           note(
@@ -448,15 +613,16 @@
       button.className = 'sheet-tab';
       button.type = 'button';
       button.textContent = name;
+      button.dataset.name = name;
       button.addEventListener('click', function () {
         renderSheet(name);
       });
       tabs.appendChild(button);
     });
 
-    root.appendChild(tabs);
     root.appendChild(host);
-    renderSheet(names[0]);
+    root.appendChild(tabs);
+    await renderSheet(names[0]);
     post({ type: 'ready', pages: names.length });
   }
 

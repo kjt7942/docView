@@ -144,8 +144,20 @@ fs.writeFileSync(
 
 console.log('[3/4] esbuild 번들링');
 const esbuild = path.join(WORK, 'node_modules', '.bin', 'esbuild');
+// 엑셀 도형(drawing)을 그릴 때 PPT 렌더러의 하위 함수를 그대로 재사용하기 위해
+// index.js 외에 몇 가지를 추가로 내보내는 진입점을 만든다.
+fs.writeFileSync(
+  path.join(WORK, 'pptx-entry.js'),
+  [
+    "export * from './node_modules/pptx-browser/src/index.js';",
+    "export { renderSpTree, getRels, loadImages } from './node_modules/pptx-browser/src/render.js';",
+    "export { parseTheme, buildThemeColors } from './node_modules/pptx-browser/src/theme.js';",
+    "export { parseXml } from './node_modules/pptx-browser/src/utils.js';",
+    '',
+  ].join('\n'),
+);
 run(esbuild, [
-  'node_modules/pptx-browser/src/index.js',
+  'pptx-entry.js',
   '--bundle',
   '--format=iife',
   '--global-name=PptxBrowser',

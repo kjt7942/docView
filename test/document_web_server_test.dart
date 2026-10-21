@@ -52,6 +52,16 @@ void main() {
     expect(vendor.statusCode, 200);
     await vendor.drain<void>();
 
+    // 엑셀 서식·도형 보강 스크립트도 서빙되어야 한다.
+    final extra = await request(
+      server.uri.replace(
+        path: '${_tokenPrefix(server)}/xlsx-extra.js',
+        queryParameters: const {},
+      ),
+    );
+    expect(extra.statusCode, 200);
+    await extra.drain<void>();
+
     final css = await request(
       server.uri.replace(
         path: '${_tokenPrefix(server)}/viewer.css',

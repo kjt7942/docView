@@ -5815,18 +5815,18 @@ var PptxBrowser = (() => {
     }
   });
 
-  // node_modules/pptx-browser/src/index.js
-  var index_exports = {};
-  __export(index_exports, {
+  // pptx-entry.js
+  var pptx_entry_exports = {};
+  __export(pptx_entry_exports, {
     PptxPlayer: () => PptxPlayer,
     PptxRenderer: () => PptxRenderer,
     PptxWriter: () => PptxWriter,
     SlideShow: () => SlideShow,
+    buildThemeColors: () => buildThemeColors,
     clearRegisteredFonts: () => clearRegisteredFonts,
     compositeShape: () => compositeShape,
     copySlideToClipboard: () => copySlideToClipboard,
     createLazyDeck: () => createLazyDeck,
-    default: () => PptxRenderer,
     downloadAllSlides: () => downloadAllSlides,
     downloadAsPdf: () => downloadAsPdf,
     downloadSlide: () => downloadSlide,
@@ -5835,16 +5835,21 @@ var PptxBrowser = (() => {
     extractAll: () => extractAll,
     extractSlide: () => extractSlide,
     extractText: () => extractText,
+    getRels: () => getRels,
     isFontAvailable: () => isFontAvailable,
     listEmbeddedFonts: () => listEmbeddedFonts,
     listRegisteredFonts: () => listRegisteredFonts,
     loadEmbeddedFonts: () => loadEmbeddedFonts,
+    loadImages: () => loadImages,
     parseAnimations: () => parseAnimations,
+    parseTheme: () => parseTheme,
     parseTransition: () => parseTransition,
+    parseXml: () => parseXml,
     registerFont: () => registerFont,
     registerFonts: () => registerFonts,
     renderAllSlidesToSvg: () => renderAllSlidesToSvg,
     renderSlideToSvg: () => renderSlideToSvg,
+    renderSpTree: () => renderSpTree,
     renderTransitionFrame: () => renderTransitionFrame,
     searchSlides: () => searchSlides
   });
@@ -9161,5 +9166,9 @@ ${xrefOffset}
       this.masterImages = {};
     }
   };
-  return __toCommonJS(index_exports);
+
+  // pptx-entry.js
+  init_render();
+  init_utils();
+  return __toCommonJS(pptx_entry_exports);
 })();
