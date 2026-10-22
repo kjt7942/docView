@@ -19,8 +19,21 @@ jobs:
           channel: stable
           cache: true
       - run: flutter pub get
-      - run: flutter analyze
-      - run: flutter test
+      # 로그를 내려받지 못하는 환경에서도 원인을 볼 수 있게 실패 내용을 주석(annotation)으로 남긴다.
+      - name: flutter analyze
+        run: |
+          set +e
+          flutter analyze > analyze.log 2>&1; code=$?
+          cat analyze.log
+          if [ $code -ne 0 ]; then grep -E "(info|warning|error) •" analyze.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done; fi
+          exit $code
+      - name: flutter test
+        run: |
+          set +e
+          flutter test > test.log 2>&1; code=$?
+          cat test.log
+          if [ $code -ne 0 ]; then grep -E "Expected|Actual|Error|error:|FAILED|\[E\]|Which:" test.log | head -40 | while IFS= read -r l; do echo "::error::$l"; done; fi
+          exit $code
       - run: flutter build apk --release
       - name: APK 크기
         run: ls -la build/app/outputs/flutter-apk/

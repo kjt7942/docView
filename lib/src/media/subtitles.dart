@@ -94,8 +94,14 @@ String samiToSrt(String sami) {
   for (var i = 0; i < cues.length; i++) {
     final cue = cues[i];
     if (cue.text.isEmpty) continue;
-    var end = i + 1 < cues.length ? cues[i + 1].start : cue.start + 4000;
-    if (end <= cue.start) end = cue.start + 1000;
+    // 같은 시각에 시작하는 다른 언어 SYNC는 건너뛰고, 다음 시각의 SYNC에서 끝낸다.
+    var end = cue.start + 4000;
+    for (var j = i + 1; j < cues.length; j++) {
+      if (cues[j].start > cue.start) {
+        end = cues[j].start;
+        break;
+      }
+    }
     out
       ..writeln(index++)
       ..writeln('${_srtTime(cue.start)} --> ${_srtTime(end)}')
