@@ -14,20 +14,102 @@ class DeviceMedia {
   static const _channel = MethodChannel('app.docviewer/media');
 
   static final _pipController = StreamController<bool>.broadcast();
+  static final _progressController =
+      StreamController<({String id, int done, int total})>.broadcast();
+  static final _doneController =
+      StreamController<({String id, bool ok, String? error})>.broadcast();
   static bool _listening = false;
+
+  static void _ensureHandler() {
+    if (_listening) return;
+    _listening = true;
+    _channel.setMethodCallHandler((call) async {
+      if (call.method == 'pipChanged') {
+        _pipController.add(call.arguments == true);
+      } else if (call.method == 'prepareProgress') {
+        final args = call.arguments;
+        if (args is Map) {
+          final id = args['id'];
+          final done = args['done'];
+          final total = args['total'];
+          if (id is String && done is int && total is int) {
+            _progressController.add((id: id, done: done, total: total));
+          }
+        }
+      } else if (call.method == 'prepareDone') {
+        final args = call.arguments;
+        if (args is Map && args['id'] is String) {
+          final error = args['error'];
+          _doneController.add((
+            id: args['id'] as String,
+            ok: args['ok'] == true,
+            error: error is String ? error : null,
+          ));
+        }
+      }
+    });
+  }
 
   /// PIP 모드에 들어가거나 나올 때 true/false가 흘러나온다.
   static Stream<bool> get pipChanges {
-    if (!_listening) {
-      _listening = true;
-      _channel.setMethodCallHandler((call) async {
-        if (call.method == 'pipChanged') {
-          _pipController.add(call.arguments == true);
-        }
-      });
-    }
+    _ensureHandler();
     return _pipController.stream;
   }
+
+  /// [prepareMedia]가 파일을 내려받는 동안의 진행률.
+  static Stream<({String id, int done, int total})> get prepareProgress {
+    _ensureHandler();
+    return _progressController.stream;
+  }
+
+  /// 받으면서 재생([PreparedMedia.stream])하는 파일의 내려받기가 끝났을 때.
+  static Stream<({String id, bool ok, String? error})> get prepareDone {
+    _ensureHandler();
+    return _doneController.stream;
+  }
+
+  /// content:// 동영상을 재생할 수 있게 백그라운드에서 연다.
+  ///
+  /// 구글 드라이브 같은 클라우드 파일은 여기서 내려받기가 일어나 오래 걸릴 수 있다.
+  /// 결과: 열린 파일 번호(fd → `fd://N`으로 재생) 또는 받아 둔 파일 경로, 혹은 오류/취소.
+  static Future<PreparedMedia>
+  prepareMedia(String uri, String id) async {
+    _ensureHandler();
+    if (!Platform.isAndroid) {
+      return PreparedMedia(path: uri);
+    }
+    try {
+      final map = await _channel.invokeMapMethod<String, Object?>(
+        'prepareMedia',
+        {'uri': uri, 'id': id},
+      );
+      final fd = map?['fd'];
+      final path = map?['path'];
+      final stream = map?['stream'];
+      final total = map?['total'];
+      final error = map?['error'];
+      return PreparedMedia(
+        fd: fd is int ? fd : null,
+        path: path is String ? path : null,
+        stream: stream is String ? stream : null,
+        total: total is int ? total : -1,
+        error: error is String
+            ? error
+            : (map == null ? '파일을 열 수 없습니다.' : null),
+        canceled: map?['canceled'] == true,
+      );
+    } on PlatformException catch (e) {
+      return PreparedMedia(error: e.message ?? '파일을 열 수 없습니다.');
+    } on MissingPluginException {
+      return PreparedMedia(path: uri);
+    }
+  }
+
+  static Future<void> cancelPrepare(String id) =>
+      _call<void>('cancelPrepare', {'id': id});
+
+  /// [prepareMedia]가 연 파일 번호를 닫는다.
+  static Future<void> closeFd(int fd) => _call<void>('closeFd', fd);
 
   static Future<T?> _call<T>(String method, [Object? arguments]) async {
     if (!Platform.isAndroid) return null;
@@ -80,4 +162,31 @@ class DeviceMedia {
         'width': width,
         'height': height,
       });
+}
+
+/// [DeviceMedia.prepareMedia]의 결과. 하나만 채워진다.
+class PreparedMedia {
+  const PreparedMedia({
+    this.fd,
+    this.path,
+    this.stream,
+    this.total = -1,
+    this.error,
+    this.canceled = false,
+  });
+
+  /// 바로 열린 파일 번호 → `fd://N` 으로 재생.
+  final int? fd;
+
+  /// 이미 다 받아 둔 파일 경로.
+  final String? path;
+
+  /// 아직 받는 중인 캐시 파일 경로(받으면서 재생).
+  final String? stream;
+
+  /// 전체 크기(모르면 -1).
+  final int total;
+
+  final String? error;
+  final bool canceled;
 }

@@ -12,6 +12,7 @@ import '../document.dart';
 import '../reader/reader_store.dart';
 import '../reader/screen_awake.dart';
 import 'device_media.dart';
+import 'growing_file_server.dart';
 import 'subtitles.dart';
 import 'video_prefs.dart';
 
@@ -106,6 +107,18 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   double? _sliderDrag;
   Timer? _saveTimer;
 
+  // 클라우드(content://) 파일 준비
+  bool _preparing = false;
+  String? _prepareId;
+  int _prepareDone = 0;
+  int _prepareTotal = -1;
+  String? _error;
+
+  // 받으면서 재생(클라우드 앱이 흐름으로만 넘겨줄 때)
+  GrowingFileServer? _streamServer;
+  String? _streamId;
+  double? _streamProgress; // 0~1, 크기를 모르면 -1, 다 받으면 null
+
   DocumentFile get _current => widget.playlist[_index];
 
   String _posKey(DocumentFile d) =>
@@ -157,7 +170,36 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       ..add(_player.stream.tracks.listen((_) => _checkAudioOnly()))
       ..add(
         _player.stream.error.listen((message) {
-          if (message.isNotEmpty) _showHud(Icons.error_outline, '재생 오류: $message');
+          if (message.isEmpty || !mounted) return;
+          // 재생 중 잠깐 나는 경고까지 막지 않도록, 아직 재생이 시작되지 않았을 때만 오류 화면을 띄운다.
+          if (_duration.value == Duration.zero) {
+            setState(() => _error = message);
+          } else {
+            _showHud(Icons.error_outline, '재생 오류: $message');
+          }
+        }),
+      )
+      ..add(
+        DeviceMedia.prepareProgress.listen((p) {
+          if (!mounted) return;
+          if (p.id == _prepareId) {
+            setState(() {
+              _prepareDone = p.done;
+              _prepareTotal = p.total;
+            });
+          } else if (p.id == _streamId) {
+            setState(() => _streamProgress = p.total > 0 ? p.done / p.total : -1);
+          }
+        }),
+      )
+      ..add(
+        DeviceMedia.prepareDone.listen((d) {
+          if (!mounted || d.id != _streamId) return;
+          _streamServer?.markComplete(failed: !d.ok);
+          setState(() => _streamProgress = null);
+          if (!d.ok && d.error != 'canceled') {
+            _showHud(Icons.cloud_off, '내려받기가 중단됐습니다: ${d.error ?? ''}', hold: const Duration(seconds: 3));
+          }
         }),
       )
       ..add(
@@ -197,11 +239,63 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
       _resumedAt = null;
       _subDelay = 0;
       _audioDelay = 0;
+      _error = null;
     });
     _position.value = Duration.zero;
     _duration.value = Duration.zero;
 
-    await _player.open(Media(doc.path), play: true);
+    // content:// 는 재생 엔진이 UI 스레드에서 동기로 열어(클라우드 파일이면 다 받을 때까지) 앱이 멈춘다.
+    // 백그라운드에서 먼저 열어 fd:// 나 받아 둔 파일 경로로 바꿔 넘긴다.
+    var source = doc.path;
+    _stopStream();
+    if (source.startsWith('content://')) {
+      await _player.stop();
+      final id = '${DateTime.now().microsecondsSinceEpoch}';
+      setState(() {
+        _preparing = true;
+        _prepareId = id;
+        _prepareDone = 0;
+        _prepareTotal = -1;
+      });
+      final r = await DeviceMedia.prepareMedia(source, id);
+      if (!mounted || _prepareId != id) {
+        // 화면을 닫았거나 다른 영상으로 넘어갔다: 열어 둔 파일은 닫는다.
+        final fd = r.fd;
+        if (fd != null) DeviceMedia.closeFd(fd);
+        return;
+      }
+      setState(() {
+        _preparing = false;
+        _prepareId = null;
+      });
+      if (r.canceled) return;
+      final fd = r.fd;
+      final path = r.path;
+      final stream = r.stream;
+      if (stream != null) {
+        // 받는 중인 파일을 루프백 서버로 흘려 재생 엔진이 바로 재생하게 한다.
+        final server = await GrowingFileServer.start(File(stream), r.total);
+        if (!mounted) {
+          await server.close();
+          DeviceMedia.cancelPrepare(id);
+          return;
+        }
+        _streamServer = server;
+        _streamId = id;
+        setState(() => _streamProgress = r.total > 0 ? 0 : -1);
+        source = server.url;
+      } else if (fd != null) {
+        // 이 fd는 재생 엔진(Media)이 다 쓰고 나면 스스로 닫는다.
+        source = 'fd://$fd';
+      } else if (path != null) {
+        source = path;
+      } else {
+        setState(() => _error = r.error ?? '파일을 열 수 없습니다.');
+        return;
+      }
+    }
+
+    await _player.open(Media(source), play: true);
     await _setProp('volume-max', '200');
     await _setProp('hwdec', _prefs?.hardwareDecoding == false ? 'no' : 'auto-safe');
     await _setProp('sub-delay', '0');
@@ -301,8 +395,22 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     }
   }
 
+  /// 받으면서 재생하던 이전 영상의 내려받기·서버를 정리한다.
+  void _stopStream() {
+    final id = _streamId;
+    if (id != null) DeviceMedia.cancelPrepare(id);
+    _streamId = null;
+    _streamServer?.close();
+    _streamServer = null;
+    _streamProgress = null;
+  }
+
   @override
   void dispose() {
+    final pending = _prepareId;
+    if (pending != null) DeviceMedia.cancelPrepare(pending);
+    _prepareId = null;
+    _stopStream();
     _saveProgress();
     _store?.save();
     _hideTimer?.cancel();
@@ -957,9 +1065,135 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
                 if (!_pip && _locked && _controlsVisible) _buildLockButton(),
                 if (!_pip && !_locked) _buildControls(context),
                 if (!_pip && _resumedAt != null) _buildResumeBanner(),
+                if (!_pip && _streamProgress != null) _buildStreamChip(),
+                // 준비·오류 화면은 맨 위(제스처 층보다 위)에 둬야 버튼이 눌린다.
+                if (_preparing) _buildPreparing(),
+                if (_error != null && !_preparing) _buildError(),
               ],
             );
           },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStreamChip() {
+    final p = _streamProgress ?? 0;
+    return Positioned(
+      right: 16,
+      top: MediaQuery.paddingOf(context).top + (_controlsVisible ? 64 : 12),
+      child: IgnorePointer(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.55),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.cloud_download_outlined, color: Colors.white70, size: 16),
+              const SizedBox(width: 6),
+              Text(
+                p < 0 ? '받으면서 재생 중' : '받으면서 재생 중 ${(p * 100).round()}%',
+                style: const TextStyle(color: Colors.white70, fontSize: 12),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPreparing() {
+    final total = _prepareTotal;
+    final done = _prepareDone;
+    String mb(int b) => (b / (1024 * 1024)).toStringAsFixed(b < 100 * 1024 * 1024 ? 1 : 0);
+    final progress = total > 0 ? (done / total).clamp(0.0, 1.0) : null;
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                SizedBox(
+                  width: 220,
+                  child: LinearProgressIndicator(value: progress),
+                ),
+                const SizedBox(height: 20),
+                Text(
+                  _current.name,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white, fontSize: 16),
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  done > 0
+                      ? '내려받는 중 ${mb(done)}MB${total > 0 ? ' / ${mb(total)}MB' : ''}'
+                      : '파일을 준비하는 중…\n구글 드라이브 같은 클라우드 파일은 영상을 먼저 받아야 해서\n시간이 걸릴 수 있습니다.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white70, height: 1.5),
+                ),
+                const SizedBox(height: 20),
+                OutlinedButton(
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                  child: const Text('취소'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildError() {
+    return Positioned.fill(
+      child: ColoredBox(
+        color: Colors.black,
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, color: Colors.white70, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  '이 파일을 재생할 수 없습니다.',
+                  style: TextStyle(color: Colors.white, fontSize: 17),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  _error ?? '',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    OutlinedButton(
+                      onPressed: () => Navigator.of(context).maybePop(),
+                      style: OutlinedButton.styleFrom(foregroundColor: Colors.white),
+                      child: const Text('닫기'),
+                    ),
+                    const SizedBox(width: 12),
+                    FilledButton(
+                      onPressed: () => _open(_index),
+                      child: const Text('다시 시도'),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

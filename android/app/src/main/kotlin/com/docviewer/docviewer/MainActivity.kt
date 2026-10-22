@@ -6,6 +6,11 @@ import android.content.pm.PackageManager
 import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.os.CancellationSignal
+import android.os.OperationCanceledException
+import android.os.ParcelFileDescriptor
+import android.system.Os
+import android.system.OsConstants
 import android.util.Rational
 import androidx.annotation.RequiresApi
 import android.provider.OpenableColumns
@@ -100,6 +105,7 @@ class MainActivity : FlutterActivity() {
     private var autoPip = false
     private var pipRatio = Rational(16, 9)
     private var pendingPick: MethodChannel.Result? = null
+    private val prepareJobs = mutableMapOf<String, CancellationSignal>()
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -144,6 +150,46 @@ class MainActivity : FlutterActivity() {
                         result.success(if (path.isNullOrBlank()) false else shareFile(path, mime))
                     }
                     "pickMedia" -> pickMedia(result)
+                    "prepareMedia" -> {
+                        val uri = call.argument<String>("uri")
+                        val id = call.argument<String>("id") ?: ""
+                        if (uri.isNullOrBlank()) {
+                            result.success(mapOf("error" to "주소가 없습니다."))
+                        } else {
+                            val signal = CancellationSignal()
+                            prepareJobs[id] = signal
+                            Thread {
+                                val res: Map<String, Any?> = try {
+                                    prepareMedia(Uri.parse(uri), signal, id)
+                                } catch (_: OperationCanceledException) {
+                                    mapOf("canceled" to true)
+                                } catch (_: SecurityException) {
+                                    mapOf("error" to "이 파일을 읽을 권한이 없습니다. 다시 열어 주세요.")
+                                } catch (e: Exception) {
+                                    mapOf("error" to (e.message ?: e.javaClass.simpleName))
+                                }
+                                runOnUiThread {
+                                    // 스트리밍(받으면서 재생)이면 받기가 끝날 때까지 취소할 수 있게 남겨 둔다.
+                                    if (!res.containsKey("stream")) prepareJobs.remove(id)
+                                    result.success(res)
+                                }
+                            }.start()
+                        }
+                    }
+                    "cancelPrepare" -> {
+                        prepareJobs[call.argument<String>("id") ?: ""]?.cancel()
+                        result.success(null)
+                    }
+                    "closeFd" -> {
+                        val fd = (call.arguments as? Number)?.toInt()
+                        if (fd != null && fd > 0) {
+                            try {
+                                ParcelFileDescriptor.adoptFd(fd).close()
+                            } catch (_: Exception) {
+                            }
+                        }
+                        result.success(null)
+                    }
                     "pipSupported" -> result.success(pipSupported())
                     "enterPip" -> {
                         pipRatio = ratioOf(call.argument<Int>("width"), call.argument<Int>("height"))
@@ -236,6 +282,81 @@ class MainActivity : FlutterActivity() {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
         startActivity(intent)
+    }
+
+    /**
+     * content:// 미디어를 재생할 수 있게 준비한다(백그라운드 스레드에서 호출).
+     *
+     * 재생 엔진(media_kit)은 content:// 를 UI 스레드에서 동기로 열기 때문에, 구글 드라이브처럼
+     * 열 때 내려받기가 필요한 파일이면 앱 전체가 멈춘다. 여기서 미리 열어 둔다.
+     * - 일반 파일로 열리면(로컬, 또는 클라우드 앱이 캐시에 다 받은 경우) 파일 디스크립터를 넘긴다 → fd://N
+     * - 파이프(스트림)로만 열리면 탐색이 안 되므로 앱 캐시에 받아 두고 그 경로를 넘긴다(진행률 알림).
+     */
+    private fun prepareMedia(uri: Uri, signal: CancellationSignal, id: String): Map<String, Any?> {
+        if (uri.scheme == "file") return mapOf("path" to (uri.path ?: uri.toString()))
+        val pfd = contentResolver.openFileDescriptor(uri, "r", signal)
+            ?: throw IllegalStateException("파일을 열 수 없습니다.")
+        val regular = try {
+            OsConstants.S_ISREG(Os.fstat(pfd.fileDescriptor).st_mode)
+        } catch (_: Exception) {
+            false
+        }
+        if (regular) return mapOf("fd" to pfd.detachFd())
+        pfd.close()
+
+        var total = -1L
+        contentResolver.query(uri, arrayOf(OpenableColumns.SIZE), null, null, null)?.use { c ->
+            if (c.moveToFirst() && !c.isNull(0)) total = c.getLong(0)
+        }
+        val dir = File(cacheDir, "media").apply { mkdirs() }
+        dir.listFiles()?.forEach { it.delete() } // 받아 둔 영상은 하나만 남긴다.
+        val out = File(dir, "stream_${System.currentTimeMillis()}")
+        out.createNewFile()
+        // 받으면서 바로 재생한다: 복사는 뒤에서 계속하고, 지금은 받는 중인 파일을 넘긴다.
+        Thread {
+            var ok = true
+            var error: String? = null
+            try {
+                val input = contentResolver.openInputStream(uri) ?: throw IllegalStateException("파일을 열 수 없습니다.")
+                input.use { src ->
+                    out.outputStream().use { dst ->
+                        val buf = ByteArray(1 shl 16)
+                        var done = 0L
+                        var reported = 0L
+                        while (true) {
+                            signal.throwIfCanceled()
+                            val n = src.read(buf)
+                            if (n < 0) break
+                            dst.write(buf, 0, n)
+                            dst.flush()
+                            done += n
+                            if (done - reported >= (1 shl 20)) {
+                                reported = done
+                                val d = done
+                                runOnUiThread {
+                                    mediaChannel?.invokeMethod(
+                                        "prepareProgress",
+                                        mapOf("id" to id, "done" to d, "total" to total),
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            } catch (_: OperationCanceledException) {
+                ok = false
+                error = "canceled"
+            } catch (e: Exception) {
+                ok = false
+                error = e.message ?: e.javaClass.simpleName
+            }
+            if (!ok) out.delete()
+            runOnUiThread {
+                prepareJobs.remove(id)
+                mediaChannel?.invokeMethod("prepareDone", mapOf("id" to id, "ok" to ok, "error" to error))
+            }
+        }.start()
+        return mapOf("stream" to out.absolutePath, "total" to total)
     }
 
     /** 동영상·음악 고르기: 복사하지 않고 content:// 주소를 그대로 돌려준다(권한은 계속 유지). */
