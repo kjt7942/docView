@@ -904,6 +904,16 @@
     }
   }
 
+  // rhwp 는 쪽마다 같은 id(cell-clip-54 등)로 clipPath 를 만든다. 여러 쪽의 SVG 를 한 문서에 넣으면
+  // url(#id) 가 첫 번째 쪽의 영역을 가리켜, 다른 쪽 표 칸의 글자가 엉뚱한 영역으로 잘려 사라진다.
+  // 쪽 번호를 붙여 id 를 쪽마다 고유하게 만든다.
+  function scopeSvgIds(markup, prefix) {
+    return markup
+      .replace(/\bid="([^"]+)"/g, 'id="' + prefix + '$1"')
+      .replace(/url\(#([^)]+)\)/g, 'url(#' + prefix + '$1)')
+      .replace(/(\b(?:xlink:)?href)="#([^"]+)"/g, '$1="#' + prefix + '$2"');
+  }
+
   async function renderRhwp(buffer) {
     var doc = await openRhwp(buffer);
     var total = doc.pageCount();
@@ -928,7 +938,7 @@
           var el = entry.target;
           if (entry.isIntersecting) {
             if (el.firstChild) return;
-            el.innerHTML = doc.renderPageSvg(Number(el.dataset.index));
+            el.innerHTML = scopeSvgIds(doc.renderPageSvg(Number(el.dataset.index)), 'p' + el.dataset.index + '-');
             var svg = el.firstElementChild;
             if (!svg) return;
             if (!svg.getAttribute('viewBox')) {
