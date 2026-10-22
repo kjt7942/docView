@@ -54,6 +54,27 @@ enum DocumentFormat {
     color: Color(0xFF7A5AF8),
     supported: true,
   ),
+  video(
+    label: '동영상',
+    extensions: [
+      'mp4', 'm4v', 'mkv', 'webm', 'avi', 'mov', 'wmv', 'asf', 'flv',
+      'ts', 'm2ts', 'mts', 'tp', 'trp', '3gp', '3g2', 'mpg', 'mpeg',
+      'vob', 'ogv', 'rm', 'rmvb', 'divx', 'f4v',
+    ],
+    icon: Icons.movie_outlined,
+    color: Color(0xFFE5484D),
+    supported: true,
+  ),
+  audio(
+    label: '음악',
+    extensions: [
+      'mp3', 'flac', 'wav', 'm4a', 'aac', 'ogg', 'oga', 'opus', 'wma',
+      'ape', 'alac', 'aiff', 'aif', 'amr', 'mka', 'dsf', 'dff', 'wv',
+    ],
+    icon: Icons.music_note_outlined,
+    color: Color(0xFF0E9F6E),
+    supported: true,
+  ),
   unknown(
     label: '기타',
     extensions: [],
@@ -107,6 +128,10 @@ class DocumentFile {
   final int size;
 
   DocumentFormat get format => DocumentFormat.fromFileName(name);
+
+  /// 동영상·음악처럼 미디어 플레이어로 여는 파일인지.
+  bool get isMedia =>
+      format == DocumentFormat.video || format == DocumentFormat.audio;
 
   /// 소문자 확장자. 예: `PDF`
   String get extension => DocumentFormat._extensionOf(name);

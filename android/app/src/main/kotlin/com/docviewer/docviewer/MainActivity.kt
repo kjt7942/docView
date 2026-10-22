@@ -1,8 +1,13 @@
 package com.docviewer.docviewer
 
+import android.app.PictureInPictureParams
 import android.content.Intent
+import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.net.Uri
 import android.os.Build
+import android.util.Rational
+import androidx.annotation.RequiresApi
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.view.WindowManager
@@ -20,7 +25,9 @@ class MainActivity : FlutterActivity() {
         const val CHANNEL = "app.docviewer/installer"
         const val INCOMING_CHANNEL = "app.docviewer/incoming"
         const val SCREEN_CHANNEL = "app.docviewer/screen"
+        const val MEDIA_CHANNEL = "app.docviewer/media"
         const val MAX_KEPT_INCOMING = 10
+        const val PICK_MEDIA = 4242
 
         // 이름에 확장자가 없을 때 MIME으로 확장자를 복원한다.
         val MIME_EXTENSIONS = mapOf(
@@ -56,10 +63,43 @@ class MainActivity : FlutterActivity() {
             "application/x-hwpx" to "hwpx",
             "application/haansofthwpx" to "hwpx",
             "application/hwp+zip" to "hwpx",
+            "video/mp4" to "mp4",
+            "video/x-matroska" to "mkv",
+            "video/webm" to "webm",
+            "video/avi" to "avi",
+            "video/x-msvideo" to "avi",
+            "video/quicktime" to "mov",
+            "video/3gpp" to "3gp",
+            "video/mp2t" to "ts",
+            "video/x-ms-wmv" to "wmv",
+            "video/x-flv" to "flv",
+            "video/mpeg" to "mpg",
+            "audio/mpeg" to "mp3",
+            "audio/flac" to "flac",
+            "audio/x-flac" to "flac",
+            "audio/wav" to "wav",
+            "audio/x-wav" to "wav",
+            "audio/mp4" to "m4a",
+            "audio/aac" to "aac",
+            "audio/ogg" to "ogg",
+            "audio/opus" to "opus",
+            "audio/x-ms-wma" to "wma",
+        )
+
+        // 동영상·음악은 수 GB일 수 있어 캐시로 복사하지 않고 원본 주소를 그대로 재생한다.
+        val MEDIA_EXTENSIONS = setOf(
+            "mp4", "m4v", "mkv", "webm", "avi", "mov", "wmv", "asf", "flv", "ts", "m2ts", "mts",
+            "tp", "trp", "3gp", "3g2", "mpg", "mpeg", "vob", "ogv", "rm", "rmvb", "divx", "f4v",
+            "mp3", "flac", "wav", "m4a", "aac", "ogg", "oga", "opus", "wma", "ape", "alac", "aiff",
+            "aif", "amr", "mka", "dsf", "dff", "wv",
         )
     }
 
     private var incomingChannel: MethodChannel? = null
+    private var mediaChannel: MethodChannel? = null
+    private var autoPip = false
+    private var pipRatio = Rational(16, 9)
+    private var pendingPick: MethodChannel.Result? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -78,6 +118,57 @@ class MainActivity : FlutterActivity() {
                     result.notImplemented()
                 }
             }
+
+        // 동영상 플레이어·이미지 뷰어용: 창 밝기, 공유, 화면 속 화면(PIP).
+        mediaChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, MEDIA_CHANNEL).also { channel ->
+            channel.setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "getBrightness" -> {
+                        val own = window.attributes.screenBrightness
+                        result.success(if (own >= 0f) own.toDouble() else systemBrightness())
+                    }
+                    "setBrightness" -> {
+                        val value = (call.arguments as? Number)?.toFloat() ?: -1f
+                        val lp = window.attributes
+                        lp.screenBrightness = if (value < 0f) {
+                            WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                        } else {
+                            value.coerceIn(0.01f, 1f)
+                        }
+                        window.attributes = lp
+                        result.success(null)
+                    }
+                    "share" -> {
+                        val path = call.argument<String>("path")
+                        val mime = call.argument<String>("mime") ?: "*/*"
+                        result.success(if (path.isNullOrBlank()) false else shareFile(path, mime))
+                    }
+                    "pickMedia" -> pickMedia(result)
+                    "pipSupported" -> result.success(pipSupported())
+                    "enterPip" -> {
+                        pipRatio = ratioOf(call.argument<Int>("width"), call.argument<Int>("height"))
+                        result.success(enterPip())
+                    }
+                    "setAutoPip" -> {
+                        autoPip = call.argument<Boolean>("enabled") == true
+                        pipRatio = ratioOf(call.argument<Int>("width"), call.argument<Int>("height"))
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && pipSupported()) {
+                            try {
+                                setPictureInPictureParams(
+                                    PictureInPictureParams.Builder()
+                                        .setAspectRatio(pipRatio)
+                                        .setAutoEnterEnabled(autoPip)
+                                        .build(),
+                                )
+                            } catch (_: Exception) {
+                            }
+                        }
+                        result.success(null)
+                    }
+                    else -> result.notImplemented()
+                }
+            }
+        }
 
         // "연결 프로그램"으로 들어온 문서를 Dart에 넘기는 채널.
         incomingChannel = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, INCOMING_CHANNEL).also { channel ->
@@ -147,6 +238,117 @@ class MainActivity : FlutterActivity() {
         startActivity(intent)
     }
 
+    /** 동영상·음악 고르기: 복사하지 않고 content:// 주소를 그대로 돌려준다(권한은 계속 유지). */
+    private fun pickMedia(result: MethodChannel.Result) {
+        if (pendingPick != null) {
+            result.error("busy", "picker already open", null)
+            return
+        }
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+            addCategory(Intent.CATEGORY_OPENABLE)
+            type = "*/*"
+            putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("video/*", "audio/*"))
+        }
+        pendingPick = result
+        try {
+            @Suppress("DEPRECATION")
+            startActivityForResult(intent, PICK_MEDIA)
+        } catch (e: Exception) {
+            pendingPick = null
+            result.error("no_picker", e.message, null)
+        }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        if (requestCode != PICK_MEDIA) {
+            @Suppress("DEPRECATION")
+            super.onActivityResult(requestCode, resultCode, data)
+            return
+        }
+        val reply = pendingPick
+        pendingPick = null
+        val uri = data?.data
+        if (resultCode != RESULT_OK || uri == null) {
+            reply?.success(null)
+            return
+        }
+        try {
+            contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        } catch (_: Exception) {
+        }
+        Thread {
+            val info: Map<String, Any?>? = try {
+                copyToCache(uri, contentResolver.getType(uri))
+            } catch (_: Exception) {
+                null
+            }
+            runOnUiThread { reply?.success(info) }
+        }.start()
+    }
+
+    private fun systemBrightness(): Double =
+        try {
+            Settings.System.getInt(contentResolver, Settings.System.SCREEN_BRIGHTNESS) / 255.0
+        } catch (_: Exception) {
+            0.5
+        }
+
+    private fun shareFile(path: String, mime: String): Boolean =
+        try {
+            val uri = if (path.startsWith("content://")) {
+                Uri.parse(path)
+            } else {
+                FileProvider.getUriForFile(this, "$packageName.fileprovider", File(path))
+            }
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = mime
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, null))
+            true
+        } catch (_: Exception) {
+            false
+        }
+
+    private fun pipSupported(): Boolean =
+        Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+            packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE)
+
+    /** PIP 비율은 1:2.39 ~ 2.39:1 범위여야 한다. */
+    private fun ratioOf(width: Int?, height: Int?): Rational {
+        val w = (width ?: 16).coerceAtLeast(1)
+        val h = (height ?: 9).coerceAtLeast(1)
+        val r = w.toDouble() / h
+        return when {
+            r > 2.39 -> Rational(239, 100)
+            r < 1 / 2.39 -> Rational(100, 239)
+            else -> Rational(w, h)
+        }
+    }
+
+    private fun enterPip(): Boolean {
+        if (!pipSupported()) return false
+        return try {
+            enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(pipRatio).build())
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        // Android 12 이상은 setAutoEnterEnabled가 알아서 처리한다.
+        if (autoPip && Build.VERSION.SDK_INT < Build.VERSION_CODES.S) enterPip()
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        mediaChannel?.invokeMethod("pipChanged", isInPictureInPictureMode)
+    }
+
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
         // 다이얼로그·파일 선택기·앱 전환에서 돌아올 때마다 다시 숨긴다.
@@ -207,9 +409,19 @@ class MainActivity : FlutterActivity() {
 
     private fun copyToCache(uri: Uri, mime: String?): Map<String, Any?> {
         var queried: String? = null
+        var querySize = -1L
         if (uri.scheme == "content") {
-            contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { cursor ->
-                if (cursor.moveToFirst()) queried = cursor.getString(0)
+            contentResolver.query(
+                uri,
+                arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE),
+                null,
+                null,
+                null,
+            )?.use { cursor ->
+                if (cursor.moveToFirst()) {
+                    queried = cursor.getString(0)
+                    if (!cursor.isNull(1)) querySize = cursor.getLong(1)
+                }
             }
         }
         val rawName: String = queried?.takeIf { it.isNotBlank() }
@@ -218,6 +430,15 @@ class MainActivity : FlutterActivity() {
         val cleaned = rawName.replace(Regex("[\\\\/:*?\"<>|]"), "_")
         val extension = if (mime != null) MIME_EXTENSIONS[mime] else null
         val name: String = if (!cleaned.contains('.') && extension != null) "$cleaned.$extension" else cleaned
+
+        val ext = name.substringAfterLast('.', "").lowercase()
+        val isMedia = mime?.startsWith("video/") == true || mime?.startsWith("audio/") == true || ext in MEDIA_EXTENSIONS
+        if (isMedia) {
+            // 복사하지 않고 원본 주소를 넘긴다(플레이어가 content:// 를 직접 연다).
+            val direct = if (uri.scheme == "file") uri.path ?: uri.toString() else uri.toString()
+            val size = if (querySize >= 0) querySize else (uri.path?.let { File(it).length() } ?: 0L)
+            return mapOf("path" to direct, "name" to name, "size" to size)
+        }
 
         val root = File(cacheDir, "incoming")
         val dir = File(root, System.currentTimeMillis().toString()).apply { mkdirs() }

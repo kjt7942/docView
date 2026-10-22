@@ -41,6 +41,12 @@ dependencies:
   package_info_plus: ^10.2.2
   url_launcher: ^6.3.3
   webview_flutter: ^4.14.1
+  # 동영상·음악 재생(libmpv): 대부분의 코덱·자막·오디오 트랙 지원
+  media_kit: ^1.2.6
+  media_kit_video: ^2.0.1
+  media_kit_libs_video: ^1.0.7
+  # 사진 촬영 정보(EXIF)
+  exif: ^3.3.0
 dev_dependencies:
   flutter_test:
     sdk: flutter

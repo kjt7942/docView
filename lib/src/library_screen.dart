@@ -10,6 +10,7 @@ import 'config.dart';
 import 'document.dart';
 import 'incoming_file.dart';
 import 'library_search.dart';
+import 'media/device_media.dart';
 import 'reader/reader_store.dart';
 import 'update/update_ui.dart';
 import 'viewer/document_viewer_screen.dart';
@@ -69,7 +70,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final store = await ReaderStore.open();
     final loaded = [
       for (final e in store.recents)
-        if (File(e.path).existsSync())
+        // content:// 는 동영상·음악을 복사 없이 연 것(권한 유지). 나머지는 파일이 남아 있을 때만.
+        if (e.path.startsWith('content://') || File(e.path).existsSync())
           DocumentFile(path: e.path, name: e.name, size: e.size),
     ];
     if (!mounted) return;
@@ -141,6 +143,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(const SnackBar(content: Text('파일을 여는 중 문제가 발생했습니다.')));
+    } finally {
+      if (mounted) setState(() => _picking = false);
+    }
+  }
+
+  /// 동영상·음악은 전용 선택기로 고른다(복사 없이 원본을 바로 재생).
+  Future<void> _pickMedia() async {
+    if (_picking) return;
+    if (!Platform.isAndroid) {
+      await _pickDocument();
+      return;
+    }
+    setState(() => _picking = true);
+    try {
+      final media = await DeviceMedia.pickMedia();
+      if (media == null || !mounted) return;
+      _remember(media);
+      _openDocument(media);
     } finally {
       if (mounted) setState(() => _picking = false);
     }
@@ -231,8 +251,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void _openDocument(DocumentFile document, {String? query}) {
     Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            DocumentViewerScreen(document: document, initialQuery: query),
+        builder: (_) => DocumentViewerScreen(
+          document: document,
+          initialQuery: query,
+          siblings: List.of(_recent),
+        ),
       ),
     );
   }
@@ -371,7 +394,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
       body: _searching
           ? _buildSearchBody(theme)
           : _recent.isEmpty
-          ? _EmptyState(onOpen: _pickDocument, busy: _picking)
+          ? _EmptyState(
+              onOpen: _pickDocument,
+              onOpenMedia: _pickMedia,
+              busy: _picking,
+            )
           : ListView.separated(
               padding: const EdgeInsets.fromLTRB(16, 8, 16, 96),
               itemCount: _recent.length + 1,
@@ -416,19 +443,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
       floatingActionButton: _recent.isEmpty || _searching
           ? null
-          : FloatingActionButton.extended(
-              onPressed: _picking ? null : _pickDocument,
-              icon: const Icon(Icons.add),
-              label: const Text('문서 열기'),
+          : Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                FloatingActionButton.small(
+                  heroTag: 'open-media',
+                  onPressed: _picking ? null : _pickMedia,
+                  tooltip: '동영상 · 음악 열기',
+                  child: const Icon(Icons.movie_outlined),
+                ),
+                const SizedBox(height: 12),
+                FloatingActionButton.extended(
+                  heroTag: 'open-document',
+                  onPressed: _picking ? null : _pickDocument,
+                  icon: const Icon(Icons.add),
+                  label: const Text('문서 열기'),
+                ),
+              ],
             ),
     );
   }
 }
 
 class _EmptyState extends StatelessWidget {
-  const _EmptyState({required this.onOpen, required this.busy});
+  const _EmptyState({
+    required this.onOpen,
+    required this.onOpenMedia,
+    required this.busy,
+  });
 
   final VoidCallback onOpen;
+  final VoidCallback onOpenMedia;
   final bool busy;
 
   @override
@@ -465,7 +511,7 @@ class _EmptyState extends StatelessWidget {
               ),
               const SizedBox(height: 10),
               Text(
-                '기기에 있는 문서를 열어 바로 확인하세요.\n파일은 서버로 전송되지 않습니다.',
+                '기기에 있는 문서·사진·동영상을 바로 열어 보세요.\n파일은 서버로 전송되지 않습니다.',
                 style: theme.textTheme.bodyMedium?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
                   height: 1.5,
@@ -484,6 +530,12 @@ class _EmptyState extends StatelessWidget {
                   ),
                 ),
               ),
+              const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: busy ? null : onOpenMedia,
+                icon: const Icon(Icons.movie_outlined),
+                label: const Text('동영상 · 음악 열기'),
+              ),
               const SizedBox(height: 40),
               Wrap(
                 spacing: 8,
@@ -498,6 +550,8 @@ class _EmptyState extends StatelessWidget {
                     DocumentFormat.hwp,
                     DocumentFormat.text,
                     DocumentFormat.image,
+                    DocumentFormat.video,
+                    DocumentFormat.audio,
                   ])
                     _FormatChip(format: format),
                 ],
