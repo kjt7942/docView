@@ -42,6 +42,15 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
     setState(() => _pageNumber = page);
   }
 
+  /// 화면 위/아래를 누르면 이전/다음 쪽으로 애니메이션 없이 바로 이동한다.
+  void _turnPage(int direction) {
+    if (!_controller.isReady) return;
+    final current = _controller.pageNumber ?? _pageNumber;
+    final target = current + direction;
+    if (target < 1 || target > _pageCount) return;
+    _controller.goToPage(pageNumber: target, duration: Duration.zero);
+  }
+
   /// pdfrx가 비밀번호를 요구할 때마다 호출된다. 맞을 때까지, 또는 null(취소)을 돌려줄 때까지 반복된다.
   Future<String?> _askPassword() {
     final retry = _passwordAttempts++ > 0;
@@ -96,6 +105,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       title: widget.document.name,
       page: _pageCount > 0 ? _pageNumber : null,
       pageCount: _pageCount > 0 ? _pageCount : null,
+      onPage: _pageCount > 0 ? _turnPage : null,
       body: PdfViewer.file(
         widget.document.path,
         key: ValueKey(_reloadCount),

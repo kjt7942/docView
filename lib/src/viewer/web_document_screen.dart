@@ -126,6 +126,11 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
     }
   }
 
+  /// 화면 위/아래를 누르면 이전/다음 쪽(쪽 구분이 없는 문서는 한 화면)으로 바로 이동한다.
+  void _turnPage(int direction) {
+    _controller?.runJavaScript('window.__docPage && window.__docPage($direction);');
+  }
+
   /// 문서 안의 링크는 http(s)/메일/전화만 외부 앱으로 연다.
   Future<void> _openLink(Object? url) async {
     final uri = url is String ? Uri.tryParse(url) : null;
@@ -168,6 +173,8 @@ class _WebDocumentScreenState extends State<WebDocumentScreen> {
       pinned: _error != null,
       page: _page,
       pageCount: _pageTotal,
+      // 엑셀은 칸·시트 탭을 눌러야 해서 상·하단 넘김을 쓰지 않는다.
+      onPage: widget.document.webKind == 'xlsx' || _error != null ? null : _turnPage,
       actions: [
         if (_error != null)
           IconButton(

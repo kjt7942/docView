@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../system_bars.dart';
 
@@ -18,6 +19,7 @@ class ReadingChrome extends StatefulWidget {
     this.page,
     this.pageCount,
     this.pinned = false,
+    this.onPage,
   });
 
   final String title;
@@ -29,6 +31,10 @@ class ReadingChrome extends StatefulWidget {
   /// true면 숨기지 않는다(오류 화면 등).
   final bool pinned;
 
+  /// 화면 위쪽(25%)을 누르면 -1(이전), 아래쪽(25%)을 누르면 +1(다음)로 불린다.
+  /// 길게 누르고 있으면 탭을 연타하듯 반복해서 불린다. null이면 상·하단 넘김을 쓰지 않는다.
+  final ValueChanged<int>? onPage;
+
   @override
   State<ReadingChrome> createState() => _ReadingChromeState();
 }
@@ -36,12 +42,23 @@ class ReadingChrome extends StatefulWidget {
 class _ReadingChromeState extends State<ReadingChrome> {
   bool _visible = false;
 
-  // 가운데 탭 감지(문서의 스크롤·확대·두 번 탭과 겹치지 않게 직접 판정한다).
+  // 터치 판정: 문서의 스크롤·확대와 겹치지 않게 포인터를 직접 보고 판단한다.
+  //  - 가운데(가로 20~80%, 세로 25~75%) 짧게 누르기 → 메뉴 표시/숨김(두 번 탭 확대와 구분)
+  //  - 위쪽 25% / 아래쪽 25% 짧게 누르기 → 이전 / 다음 쪽(즉시)
+  //  - 위쪽/아래쪽을 길게 누르고 있기 → 탭을 연타하듯 한 쪽씩 계속 넘김
+  static const _zone = 0.25;
+  static const _holdDelay = Duration(milliseconds: 450);
+  static const _holdInterval = Duration(milliseconds: 333);
+
   Offset? _downAt;
   DateTime? _downTime;
+  int _downZone = 0; // -1 위, 1 아래, 0 그 밖
   int _pointers = 0;
   bool _multi = false;
   Timer? _tapTimer;
+  Timer? _holdStart;
+  Timer? _holdRepeat;
+  bool _holding = false;
 
   @override
   void initState() {
@@ -52,6 +69,7 @@ class _ReadingChromeState extends State<ReadingChrome> {
   @override
   void dispose() {
     _tapTimer?.cancel();
+    _stopHold();
     // 목록(탐색기) 화면은 내비게이션 버튼이 항상 보인다.
     SystemBars.show(true);
     super.dispose();
@@ -63,17 +81,57 @@ class _ReadingChromeState extends State<ReadingChrome> {
     if (!_visible) setState(() => _visible = true);
   }
 
-  void _onPointerDown(PointerDownEvent e) {
+  void _stopHold() {
+    _holdStart?.cancel();
+    _holdStart = null;
+    _holdRepeat?.cancel();
+    _holdRepeat = null;
+  }
+
+  int _zoneOf(Offset p, Size size) {
+    if (widget.onPage == null) return 0;
+    if (p.dy < size.height * _zone) return -1;
+    if (p.dy > size.height * (1 - _zone)) return 1;
+    return 0;
+  }
+
+  void _onPointerDown(PointerDownEvent e, Size size) {
     _pointers++;
-    if (_pointers > 1) _multi = true;
-    if (_pointers == 1) {
-      _downAt = e.position;
-      _downTime = DateTime.now();
+    if (_pointers > 1) {
+      _multi = true;
+      _stopHold();
+      return;
+    }
+    _downAt = e.position;
+    _downTime = DateTime.now();
+    _holding = false;
+    _downZone = _zoneOf(e.localPosition, size);
+    if (_downZone == 0) {
       // 두 번 탭(문서 확대)이면 앞의 탭은 메뉴 토글로 치지 않는다.
       if (_tapTimer?.isActive ?? false) {
         _tapTimer!.cancel();
         _downAt = null;
       }
+      return;
+    }
+    final dir = _downZone;
+    _holdStart = Timer(_holdDelay, () {
+      if (!mounted || _multi || _downAt == null) return;
+      _holding = true;
+      HapticFeedback.selectionClick();
+      if (_visible) setState(() => _visible = false);
+      widget.onPage?.call(dir);
+      _holdRepeat = Timer.periodic(_holdInterval, (_) => widget.onPage?.call(dir));
+    });
+  }
+
+  void _onPointerMove(PointerMoveEvent e) {
+    final start = _downAt;
+    if (start == null) return;
+    // 끌어서 스크롤하는 중이면 넘김·탭이 아니다.
+    if ((e.position - start).distance > 12) {
+      _stopHold();
+      if (!_holding) _downAt = null;
     }
   }
 
@@ -82,14 +140,24 @@ class _ReadingChromeState extends State<ReadingChrome> {
     final start = _downAt;
     final time = _downTime;
     final multi = _multi;
+    final held = _holding;
+    _stopHold();
+    _holding = false;
     if (_pointers == 0) _multi = false;
-    if (start == null || time == null || multi || _pointers > 0) return;
+    if (start == null || time == null || multi || held || _pointers > 0) return;
     _downAt = null;
     final moved = (e.position - start).distance;
-    final quick = DateTime.now().difference(time) < const Duration(milliseconds: 300);
+    final quick = DateTime.now().difference(time) < const Duration(milliseconds: 350);
     if (moved > 12 || !quick) return;
-    // 가운데 영역(가로 20~80%, 세로 25~75%)만 메뉴를 토글한다. 가장자리의 링크·탭은 그대로 쓴다.
+
     final p = e.localPosition;
+    final zone = _zoneOf(p, size);
+    if (zone != 0) {
+      // 연타해도 매번 바로 넘어가도록 기다리지 않는다.
+      if (_visible) setState(() => _visible = false);
+      widget.onPage?.call(zone);
+      return;
+    }
     final inCenter = p.dx > size.width * 0.2 &&
         p.dx < size.width * 0.8 &&
         p.dy > size.height * 0.25 &&
@@ -103,6 +171,8 @@ class _ReadingChromeState extends State<ReadingChrome> {
   void _onPointerCancel(PointerCancelEvent e) {
     _pointers = _pointers > 0 ? _pointers - 1 : 0;
     _downAt = null;
+    _stopHold();
+    _holding = false;
     if (_pointers == 0) _multi = false;
   }
 
@@ -124,7 +194,8 @@ class _ReadingChromeState extends State<ReadingChrome> {
             child: LayoutBuilder(
               builder: (context, box) => Listener(
                 behavior: HitTestBehavior.translucent,
-                onPointerDown: _onPointerDown,
+                onPointerDown: (e) => _onPointerDown(e, box.biggest),
+                onPointerMove: _onPointerMove,
                 onPointerUp: (e) => _onPointerUp(e, box.biggest),
                 onPointerCancel: _onPointerCancel,
                 child: widget.body,

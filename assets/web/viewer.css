@@ -22,6 +22,10 @@
 * { box-sizing: border-box; }
 
 html, body {
+  /* 위/아래를 길게 눌러 쪽을 넘길 때 글자 선택·메뉴가 뜨지 않게 한다. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
   margin: 0;
   padding: 0;
   background: var(--bg);

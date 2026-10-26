@@ -41,7 +41,42 @@
   );
 
   // 쪽 단위 문서에서 지금 보고 있는 쪽을 앱에 알린다(앱이 "7 / 8"을 그린다).
+  // 앱이 화면 위/아래 터치로 부른다: 다음(1)/이전(-1) 쪽으로 애니메이션 없이 바로 이동.
+  // 쪽 구분이 있는 문서는 쪽 머리로, 쪽이 화면보다 길거나 쪽 구분이 없으면 한 화면씩.
+  var pageSelector = null;
+  window.__docPage = function (dir) {
+    var vh = window.innerHeight;
+    var step = vh * 0.9;
+    var y = window.scrollY;
+    var els = pageSelector ? document.querySelectorAll(pageSelector) : [];
+    var target = null;
+    var i, r;
+    if (els.length) {
+      if (dir > 0) {
+        for (i = 0; i < els.length; i++) {
+          r = els[i].getBoundingClientRect();
+          if (r.top > 24) {
+            if (r.top <= vh * 0.98) target = y + r.top - 6;
+            break;
+          }
+        }
+      } else {
+        for (i = els.length - 1; i >= 0; i--) {
+          r = els[i].getBoundingClientRect();
+          if (r.top < -8) {
+            if (r.top >= -vh * 0.98) target = y + r.top - 6;
+            break;
+          }
+        }
+      }
+    }
+    if (target === null) target = y + dir * step;
+    var max = document.documentElement.scrollHeight - vh;
+    window.scrollTo({ top: Math.max(0, Math.min(max, target)), left: window.scrollX, behavior: 'instant' });
+  };
+
   function trackPages(selector) {
+    pageSelector = selector;
     var last = 0;
     var lastTotal = 0;
     var ticking = false;
