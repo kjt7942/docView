@@ -1,12 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
-/// 문서를 읽는 동안 상단 제목줄과 상태 표시줄을 숨겨 화면을 넓게 쓰는 틀.
+import '../system_bars.dart';
+
+/// 문서를 읽는 동안 상단 제목줄과 시스템 막대(상태 표시줄·내비게이션 버튼)를 숨겨 화면을 넓게 쓰는 틀.
 ///
-/// 열 때 잠깐 보여 준 뒤 사라지고, 화면 맨 위를 살짝 누르거나 아래로 쓸어내리면 다시 나타난다
-/// (하단 시스템 내비게이션 바를 밑에서 위로 쓸어 올려 부르는 것과 같은 방식).
+/// 처음에는 숨긴 채로 열리고, **화면 가운데를 한 번 누르면** 제목줄과 내비게이션 버튼이 함께
+/// 나타난다. 다시 가운데를 누르면 함께 숨는다. 화면 맨 위를 누르거나 아래로 쓸어내려도 나타난다.
 /// [page]/[pageCount]가 주어지면 오른쪽 아래에 "7 / 8" 쪽수를 계속 보여 준다.
 class ReadingChrome extends StatefulWidget {
   const ReadingChrome({
@@ -33,39 +34,76 @@ class ReadingChrome extends StatefulWidget {
 }
 
 class _ReadingChromeState extends State<ReadingChrome> {
-  static const _showFor = Duration(milliseconds: 2800);
+  bool _visible = false;
 
-  bool _visible = true;
-  Timer? _timer;
+  // 가운데 탭 감지(문서의 스크롤·확대·두 번 탭과 겹치지 않게 직접 판정한다).
+  Offset? _downAt;
+  DateTime? _downTime;
+  int _pointers = 0;
+  bool _multi = false;
+  Timer? _tapTimer;
 
   @override
   void initState() {
     super.initState();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
-    _scheduleHide();
+    SystemBars.show(false);
   }
 
   @override
   void dispose() {
-    _timer?.cancel();
-    // 목록 화면의 상태(상태 표시줄만 보이고 내비게이션 바는 숨김)로 되돌린다.
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: const [SystemUiOverlay.top],
-    );
+    _tapTimer?.cancel();
+    // 목록(탐색기) 화면은 내비게이션 버튼이 항상 보인다.
+    SystemBars.show(true);
     super.dispose();
   }
 
-  void _scheduleHide() {
-    _timer?.cancel();
-    _timer = Timer(_showFor, () {
-      if (mounted && !widget.pinned) setState(() => _visible = false);
-    });
-  }
+  void _toggle() => setState(() => _visible = !_visible);
 
   void _reveal() {
     if (!_visible) setState(() => _visible = true);
-    _scheduleHide();
+  }
+
+  void _onPointerDown(PointerDownEvent e) {
+    _pointers++;
+    if (_pointers > 1) _multi = true;
+    if (_pointers == 1) {
+      _downAt = e.position;
+      _downTime = DateTime.now();
+      // 두 번 탭(문서 확대)이면 앞의 탭은 메뉴 토글로 치지 않는다.
+      if (_tapTimer?.isActive ?? false) {
+        _tapTimer!.cancel();
+        _downAt = null;
+      }
+    }
+  }
+
+  void _onPointerUp(PointerUpEvent e, Size size) {
+    _pointers = _pointers > 0 ? _pointers - 1 : 0;
+    final start = _downAt;
+    final time = _downTime;
+    final multi = _multi;
+    if (_pointers == 0) _multi = false;
+    if (start == null || time == null || multi || _pointers > 0) return;
+    _downAt = null;
+    final moved = (e.position - start).distance;
+    final quick = DateTime.now().difference(time) < const Duration(milliseconds: 300);
+    if (moved > 12 || !quick) return;
+    // 가운데 영역(가로 20~80%, 세로 25~75%)만 메뉴를 토글한다. 가장자리의 링크·탭은 그대로 쓴다.
+    final p = e.localPosition;
+    final inCenter = p.dx > size.width * 0.2 &&
+        p.dx < size.width * 0.8 &&
+        p.dy > size.height * 0.25 &&
+        p.dy < size.height * 0.75;
+    if (!inCenter) return;
+    _tapTimer = Timer(const Duration(milliseconds: 280), () {
+      if (mounted) _toggle();
+    });
+  }
+
+  void _onPointerCancel(PointerCancelEvent e) {
+    _pointers = _pointers > 0 ? _pointers - 1 : 0;
+    _downAt = null;
+    if (_pointers == 0) _multi = false;
   }
 
   @override
@@ -74,13 +112,25 @@ class _ReadingChromeState extends State<ReadingChrome> {
     final top = MediaQuery.paddingOf(context).top;
     final bottom = MediaQuery.paddingOf(context).bottom;
     final show = _visible || widget.pinned;
+    // 제목줄이 보일 때만 시스템 내비게이션 버튼도 보인다.
+    SystemBars.show(show);
     final page = widget.page;
     final count = widget.pageCount;
 
     return Scaffold(
       body: Stack(
         children: [
-          Positioned.fill(child: widget.body),
+          Positioned.fill(
+            child: LayoutBuilder(
+              builder: (context, box) => Listener(
+                behavior: HitTestBehavior.translucent,
+                onPointerDown: _onPointerDown,
+                onPointerUp: (e) => _onPointerUp(e, box.biggest),
+                onPointerCancel: _onPointerCancel,
+                child: widget.body,
+              ),
+            ),
+          ),
           if (page != null && count != null && count > 1)
             Positioned(
               right: 14,

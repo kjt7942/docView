@@ -11,6 +11,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../document.dart';
 import '../reader/reader_store.dart';
 import '../reader/screen_awake.dart';
+import '../system_bars.dart';
 import 'device_media.dart';
 import 'growing_file_server.dart';
 import 'subtitles.dart';
@@ -127,7 +128,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemBars.show(false);
     ScreenAwake.set(true);
     _setup();
   }
@@ -429,10 +430,7 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
     DeviceMedia.setBrightness(null);
     ScreenAwake.set(false);
     SystemChrome.setPreferredOrientations(const []);
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: const [SystemUiOverlay.top],
-    );
+    SystemBars.show(true);
     super.dispose();
   }
 
@@ -992,6 +990,8 @@ class _VideoPlayerScreenState extends State<VideoPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 조작 막대가 보일 때만 시스템 내비게이션 버튼도 보인다.
+    SystemBars.show(_controlsVisible && !_locked && !_pip);
     final controller = _controller;
     final prefs = _prefs;
     return PopScope(

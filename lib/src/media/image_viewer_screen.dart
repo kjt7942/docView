@@ -7,6 +7,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../document.dart';
+import '../system_bars.dart';
 import 'device_media.dart';
 
 /// 사진 보기(안드로이드 기본 갤러리 수준).
@@ -38,7 +39,7 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
             : widget.initialIndex);
 
   final Map<int, int> _turns = {};
-  bool _chrome = true;
+  bool _chrome = false;
   bool _zoomed = false;
   Timer? _slideshow;
   double _dismissDy = 0;
@@ -48,17 +49,14 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
   @override
   void initState() {
     super.initState();
-    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    SystemBars.show(false);
   }
 
   @override
   void dispose() {
     _slideshow?.cancel();
     _pages.dispose();
-    SystemChrome.setEnabledSystemUIMode(
-      SystemUiMode.manual,
-      overlays: const [SystemUiOverlay.top],
-    );
+    SystemBars.show(true);
     super.dispose();
   }
 
@@ -171,6 +169,8 @@ class _ImageViewerScreenState extends State<ImageViewerScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 위아래 막대가 보일 때만 시스템 내비게이션 버튼도 보인다.
+    SystemBars.show(_chrome);
     final padding = MediaQuery.paddingOf(context);
     final total = widget.images.length;
     final dismissProgress = (_dismissDy.abs() / 300).clamp(0.0, 1.0);

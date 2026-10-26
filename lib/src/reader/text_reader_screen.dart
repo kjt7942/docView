@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart' show ScrollDirection;
 import 'package:flutter/services.dart';
 
 import '../document.dart';
+import '../system_bars.dart';
 import 'reader_settings.dart';
 import 'reader_settings_sheet.dart';
 import 'reader_store.dart';
@@ -120,6 +121,7 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
     _holdTimer?.cancel();
     _autoHide?.cancel();
     ScreenAwake.set(false);
+    SystemBars.show(true);
     _scroll.removeListener(_onScroll);
     _store?.save();
     _scroll.dispose();
@@ -619,6 +621,8 @@ class _TextReaderScreenState extends State<TextReaderScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // 메뉴(위아래 막대)가 보일 때만 시스템 내비게이션 버튼도 보인다.
+    SystemBars.show(_showBars || _searching);
     final bg = Color(_s.background);
     final fg = Color(_s.text);
     final media = MediaQuery.of(context);

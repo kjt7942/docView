@@ -12,6 +12,7 @@ import 'incoming_file.dart';
 import 'library_search.dart';
 import 'media/device_media.dart';
 import 'reader/reader_store.dart';
+import 'system_bars.dart';
 import 'update/update_ui.dart';
 import 'viewer/document_viewer_screen.dart';
 
@@ -39,6 +40,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   void initState() {
     super.initState();
+    // 목록(탐색기) 화면에서는 시스템 내비게이션 버튼을 항상 보여 준다.
+    SystemBars.show(true);
     // 시작할 때 조용히 업데이트를 확인한다. 실패해도 앱 사용에는 지장이 없다.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) checkForUpdates(context);
