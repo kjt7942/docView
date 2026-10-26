@@ -4,7 +4,6 @@ import 'dart:ui' as ui;
 
 import 'package:exif/exif.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 
 import '../document.dart';
 import '../system_bars.dart';
