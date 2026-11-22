@@ -133,17 +133,37 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
       _snack('모든 쪽을 삭제할 수는 없습니다.');
       return;
     }
+    var removeSecurity = false;
     final ok = await showDialog<bool>(
       context: context,
-      builder: (c) => AlertDialog(
-        title: Text('${picked.length}쪽 삭제'),
-        content: const Text('원본 파일에서 선택한 쪽이 삭제되며 되돌릴 수 없습니다.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(c, false), child: const Text('취소')),
-          FilledButton(
-              onPressed: () => Navigator.pop(c, true), child: const Text('삭제')),
-        ],
+      builder: (c) => StatefulBuilder(
+        builder: (c, setD) => AlertDialog(
+          title: Text('${picked.length}쪽 삭제'),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text('원본 파일에서 선택한 쪽이 삭제되며 되돌릴 수 없습니다.'),
+              if (doc.isEncrypted)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: removeSecurity,
+                  onChanged: (v) => setD(() => removeSecurity = v ?? false),
+                  title: const Text('암호 해제하고 저장'),
+                  subtitle: const Text('끄면 암호가 그대로 유지됩니다.'),
+                ),
+            ],
+          ),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(c, false),
+                child: const Text('취소')),
+            FilledButton(
+                onPressed: () => Navigator.pop(c, true),
+                child: const Text('삭제')),
+          ],
+        ),
       ),
     );
     if (ok != true || !mounted) return;
@@ -152,7 +172,7 @@ class _PdfViewerScreenState extends State<PdfViewerScreen> {
         for (final p in doc.pages)
           if (!picked.contains(p.pageNumber)) p,
       ];
-      final bytes = await doc.encodePdf();
+      final bytes = await doc.encodePdf(removeSecurity: removeSecurity);
       final tmp = File('${widget.document.path}.tmp');
       await tmp.writeAsBytes(bytes, flush: true);
       await tmp.rename(widget.document.path);
