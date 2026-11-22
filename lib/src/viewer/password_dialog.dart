@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// 암호로 보호된 문서의 비밀번호를 묻는다. 취소하면 null.
 ///

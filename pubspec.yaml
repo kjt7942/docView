@@ -30,6 +30,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Flutter 3.50부터 Material 위젯은 프레임워크에서 분리된 별도 패키지로 제공된다.
+  material_ui: ^1.8.0
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.

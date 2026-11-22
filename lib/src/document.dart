@@ -1,4 +1,4 @@
-import 'package:flutter/material.dart';
+import 'package:material_ui/material_ui.dart';
 
 /// 문서 포맷. 뷰어가 어떤 렌더러로 보낼지 결정하는 단위다.
 ///
